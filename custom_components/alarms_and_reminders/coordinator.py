@@ -83,6 +83,12 @@ class AlarmAndReminderCoordinator:
         self._used_alarm_ids = set()  # Track used alarm IDs
         self._used_reminder_ids = set()  # Track used reminder IDs
 
+        # Notification action mapping: listen once globally and dispatch by tag
+        self._notification_listener = hass.bus.async_listen(
+            "mobile_app_notification_action", self._on_mobile_notification_action
+        )
+        self._notification_tag_map: Dict[str, str] = {}  # tag -> item_id
+
     def _get_next_available_id(self, prefix: str) -> str:
         """Get next available ID for alarms."""
         counter = 1
@@ -93,42 +99,53 @@ class AlarmAndReminderCoordinator:
             counter += 1
 
     async def async_load_items(self) -> None:
-        """Load items from storage and update used IDs."""
+        """Load items from storage and restore internal state (called at startup)."""
         try:
             self._active_items = await self.storage.async_load()
-            
-            # Update used IDs from loaded items
-            self._used_alarm_ids.clear()
-            self._used_reminder_ids.clear()
-            
-            for item_id, item in self._active_items.items():
-                if item.get("is_alarm"):
-                    self._used_alarm_ids.add(item_id)
-                else:
-                    self._used_reminder_ids.add(item_id)
-            
             _LOGGER.debug("Loaded items from storage: %s", self._active_items)
-            
-            # Recreate stop events for active items
-            for item_id, item in self._active_items.items():
-                if item["status"] == "active":
-                    self._stop_events[item_id] = asyncio.Event()
-            
-            # Schedule active items
-            now = dt_util.now()
-            for item_id, item in self._active_items.items():
-                if item["status"] == "scheduled":
-                    delay = (item["scheduled_time"] - now).total_seconds()
-                    if delay > 0:
-                        self.hass.loop.call_later(
-                            delay,
-                            lambda: self.hass.async_create_task(
-                                self._trigger_item(item_id)
-                            )
-                        )
-        except Exception as err:
-            _LOGGER.error("Error loading items: %s", err, exc_info=True)
 
+            # Rebuild used id sets (if you track them)
+            self._used_alarm_ids = {iid for iid, it in self._active_items.items() if it.get("is_alarm")}
+            self._used_reminder_ids = {iid for iid, it in self._active_items.items() if not it.get("is_alarm")}
+
+            # Recreate stop events for any active items
+            for item_id, item in list(self._active_items.items()):
+                status = item.get("status", "scheduled")
+                # Normalize scheduled_time if it's a string
+                if "scheduled_time" in item and isinstance(item["scheduled_time"], str):
+                    item["scheduled_time"] = dt_util.parse_datetime(item["scheduled_time"])
+
+                if status == "active":
+                    self._stop_events[item_id] = asyncio.Event()
+                    # start playback in background
+                    self.hass.async_create_task(self._start_playback(item_id), name=f"playback_{item_id}")
+
+                elif status == "scheduled":
+                    now = dt_util.now()
+                    sched = item.get("scheduled_time")
+                    if not sched:
+                        continue
+                    # ensure datetime object
+                    if isinstance(sched, str):
+                        sched = dt_util.parse_datetime(sched)
+                        item["scheduled_time"] = sched
+                    delay = (sched - now).total_seconds()
+                    if delay <= 0:
+                        # If in past, optionally reschedule or trigger immediately; here trigger immediately
+                        self.hass.async_create_task(self._trigger_item(item_id))
+                    else:
+                        # capture item_id in lambda default to avoid late binding
+                        self.hass.loop.call_later(delay, lambda iid=item_id: self.hass.async_create_task(self._trigger_item(iid)))
+
+            # Restore HA entity state for each item
+            state_data = dict(item)
+            if "scheduled_time" in state_data and isinstance(state_data["scheduled_time"], datetime):
+                state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
+            self.hass.states.async_set(f"{DOMAIN}.{item_id}", item.get("status", "scheduled"), state_data)
+
+        except Exception as err:
+            _LOGGER.error("Error loading items in coordinator: %s", err, exc_info=True)
+        
     async def schedule_item(self, call: ServiceCall, is_alarm: bool, target: dict) -> None:
         """Schedule an alarm or reminder."""
         try:
@@ -265,37 +282,80 @@ class AlarmAndReminderCoordinator:
 
         try:
             item = self._active_items[item_id]
-            
-            # Set status to active first
+
+            # Set status to active and persist
             item["status"] = "active"
             self._active_items[item_id] = item
-            
-            # Update entity state immediately
-            self.hass.states.async_set(
-                f"{DOMAIN}.{item_id}",
-                "active",
-                item
-            )
-            
-            # Create new stop event
+            await self.storage.async_save(self._active_items)
+
+            # Update entity state (serialize datetime)
+            state_data = dict(item)
+            if "scheduled_time" in state_data and isinstance(state_data["scheduled_time"], datetime):
+                state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
+            self.hass.states.async_set(f"{DOMAIN}.{item_id}", "active", state_data)
+            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+
+            # Create stop event and start playback in background task
             stop_event = asyncio.Event()
             self._stop_events[item_id] = stop_event
 
-            # Send notification if configured
+            # Send notification if configured (do not block playback start)
             if item.get("notify_device"):
-                _LOGGER.debug("Sending notification to device: %s", item["notify_device"])
-                await self._send_notification(item_id, item)
+                # map tag to item_id so global listener can route actions
+                self._notification_tag_map[item_id] = item_id
+                self.hass.async_create_task(self._send_notification(item_id, item))
 
-            # Start playback based on target type
-            if item["satellite"]:
-                await self._satellite_playback_loop(item, stop_event)
-            elif item["media_players"]:
-                await self._media_player_playback_loop(item, stop_event)
+            # Start playback non-blocking so stop_item can set stop_event
+            self.hass.async_create_task(self._start_playback(item_id), name=f"playback_{item_id}")
 
         except Exception as err:
-            _LOGGER.error("Error triggering item %s: %s", item_id, err)
+            _LOGGER.error("Error triggering item %s: %s", item_id, err, exc_info=True)
             item["status"] = "error"
+            self._active_items[item_id] = item
+            await self.storage.async_save(self._active_items)
             self.hass.states.async_set(f"{DOMAIN}.{item_id}", "error", item)
+            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+
+    async def _start_playback(self, item_id: str) -> None:
+        """Start playback loops for an active item (background task)."""
+        try:
+            item = self._active_items.get(item_id)
+            if not item:
+                _LOGGER.debug("Playback start: item %s not found", item_id)
+                return
+
+            stop_event = self._stop_events.get(item_id)
+            if not stop_event:
+                stop_event = asyncio.Event()
+                self._stop_events[item_id] = stop_event
+
+            if item.get("satellite"):
+                await self._satellite_playback_loop(item, stop_event)
+            elif item.get("media_players"):
+                await self._media_player_playback_loop(item, stop_event)
+            else:
+                _LOGGER.debug("No playback target for %s", item_id)
+
+            # After playback ends, update status if still present and not manually stopped earlier
+            if item_id in self._active_items:
+                if self._active_items[item_id].get("status") == "active":
+                    self._active_items[item_id]["status"] = "stopped"
+                    self._active_items[item_id]["last_stopped"] = dt_util.now().isoformat()
+                    await self.storage.async_save(self._active_items)
+                    self.hass.states.async_set(f"{DOMAIN}.{item_id}", "stopped", self._active_items[item_id])
+                    self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+
+            # cleanup notification tag mapping and stop_event
+            self._notification_tag_map.pop(item_id, None)
+            self._stop_events.pop(item_id, None)
+
+        except Exception as err:
+            _LOGGER.error("Error in playback task for %s: %s", item_id, err, exc_info=True)
+            if item_id in self._active_items:
+                self._active_items[item_id]["status"] = "error"
+                await self.storage.async_save(self._active_items)
+                self.hass.states.async_set(f"{DOMAIN}.{item_id}", "error", self._active_items[item_id])
+                self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
 
     async def _send_notification(self, item_id: str, item: dict) -> None:
         """Send notification with action buttons."""
@@ -304,196 +364,59 @@ class AlarmAndReminderCoordinator:
             if not device_id:
                 return
 
-            # Format the message
+            # Accept either "mobile_app_xxx" or "notify.mobile_app_xxx" or just device id
+            # Normalize to notify service target (service = mobile_app_xxx)
+            if device_id.startswith("notify."):
+                service_target = device_id.split(".", 1)[1]
+            elif device_id.startswith("mobile_app_"):
+                service_target = device_id
+            else:
+                # user provided raw id (e.g. mobile_app_sm_a528b) or 'sm_a528b' - assume mobile_app_ prefix if missing 'mobile_app_'
+                service_target = device_id if device_id.startswith("mobile_app_") else f"mobile_app_{device_id}"
+
             message = item.get("message") or f"It's {dt_util.now().strftime('%I:%M %p')}"
-            
-            notification_data = {
+            payload = {
                 "message": message,
-                "title": f"{item.get('name', 'Alarm & Reminder')} - {item['status'].title()}",
+                "title": f"{item.get('name', 'Alarm & Reminder')}",
                 "data": {
                     "tag": item_id,
-                    "group": "alarms_and_reminders",
-                    "color": "#ff9800",
-                    "sticky": "true",
-                    "importance": "high",
-                    "notification_icon": "mdi:alarm-bell" if item["is_alarm"] else "mdi:reminder",
-                    "channel": "Alarms and Reminders",
                     "actions": [
-                        {
-                            "action": "stop",
-                            "title": "Stop",
-                            "icon": "mdi:stop"
-                        },
-                        {
-                            "action": "snooze",
-                            "title": "Snooze",
-                            "icon": "mdi:snooze"
-                        }
-                    ],
-                    "android": {
-                        "channel": "alarms_and_reminders",
-                        "priority": "high",
-                        "vibrationPattern": [200, 100, 200]
-                    }
+                        {"action": "stop", "title": "Stop"},
+                        {"action": "snooze", "title": "Snooze"}
+                    ]
                 }
             }
 
-            # Call the notify service
-            service_name = f"mobile_app_{device_id}" if not device_id.startswith("mobile_app_") else device_id
-            _LOGGER.debug("Calling notify service: %s with data: %s", service_name, notification_data)
-            
-            await self.hass.services.async_call(
-                "notify",
-                service_name,
-                notification_data,
-                blocking=True
-            )
+            _LOGGER.debug("Notify %s -> %s", service_target, payload)
+            await self.hass.services.async_call("notify", service_target, payload, blocking=True)
 
-            # Register action handler
-            @callback
-            def handle_action(event):
-                """Handle mobile app notification action."""
-                if event.data.get("tag") == item_id:
-                    action = event.data.get("action")
-                    if action == "stop":
-                        self.hass.async_create_task(self.stop_item(item_id, item["is_alarm"]))
-                    elif action == "snooze":
-                        self.hass.async_create_task(self.snooze_item(item_id, 5, item["is_alarm"]))
-
-            # Listen for notification actions
-            self.hass.bus.async_listen_once("mobile_app_notification_action", handle_action)
         except Exception as err:
             _LOGGER.error("Error sending notification for item %s: %s", item_id, err, exc_info=True)
 
-    async def _handle_notification_action(self, event, item_id: str, item: dict) -> None:
-        """Handle notification action button presses."""
+    @callback
+    def _on_mobile_notification_action(self, event) -> None:
+        """Global handler for mobile_app_notification_action events."""
         try:
-            if event.data.get("tag") != item_id:
+            tag = event.data.get("tag")
+            action = event.data.get("action")
+            if not tag:
                 return
 
-            action = event.data.get("action")
-            if action == "STOP":
-                await self.stop_item(item_id, item["is_alarm"])
-            elif action == "SNOOZE":
-                await self.snooze_item(item_id, 5, item["is_alarm"])
+            # Map tag to item id (we stored item_id as tag earlier)
+            item_id = tag if tag in self._active_items else self._notification_tag_map.get(tag)
+            if not item_id:
+                _LOGGER.debug("Notification action for unknown tag: %s", tag)
+                return
+
+            _LOGGER.debug("Notification action '%s' for item %s", action, item_id)
+            if action == "stop":
+                self.hass.async_create_task(self.stop_item(item_id, self._active_items[item_id]["is_alarm"]))
+            elif action == "snooze":
+                # default snooze minutes
+                self.hass.async_create_task(self.snooze_item(item_id, DEFAULT_SNOOZE_MINUTES, self._active_items[item_id]["is_alarm"]))
 
         except Exception as err:
-            _LOGGER.error("Error handling notification action: %s", err)
-
-    async def _satellite_playback_loop(self, item: dict, stop_event: asyncio.Event) -> None:
-        """Handle satellite playback loop."""
-        try:
-            # Use item's custom sound file or fall back to default
-            sound_file = item.get(
-                "sound_file",
-                self.media_handler.alarm_sound if item["is_alarm"] else self.media_handler.reminder_sound
-            )
-            
-            # Check if item is still active before starting playback
-            item_id = item["entity_id"]
-            if item_id in self._active_items and self._active_items[item_id]["status"] == "active":
-                await self.announcer.announce_on_satellite(
-                    satellite=item["satellite"],
-                    message=item["message"],
-                    sound_file=sound_file,
-                    stop_event=stop_event,
-                    name=item["name"], # Use the genrated/provided name
-                    is_alarm=item["is_alarm"]
-                )
-            else:
-                _LOGGER.debug("Item %s is no longer active, stopping playback", item_id)
-                if stop_event:
-                    stop_event.set()
-
-        except Exception as err:
-            _LOGGER.error("Error in satellite playback loop: %s", err)
-            item["status"] = "error"
-
-    async def _media_player_playback_loop(self, item: dict, stop_event: asyncio.Event) -> None:
-        """Handle media player playback loop."""
-        item_id = item["entity_id"]
-        
-        while not stop_event.is_set():
-            try:
-                # Check if item is still active
-                if item_id not in self._active_items or self._active_items[item_id]["status"] != "active":
-                    _LOGGER.debug("Item %s is no longer active, stopping playback loop", item_id)
-                    stop_event.set()
-                    break
-
-                for media_player in item["media_players"]:
-                    # Wait for media player to be idle
-                    while not await self._is_media_player_idle(media_player):
-                        # Check status again while waiting
-                        if (item_id not in self._active_items or 
-                            self._active_items[item_id]["status"] != "active"):
-                            stop_event.set()
-                            return
-                        await asyncio.sleep(1)
-
-                    # Format message with current time
-                    current_time = self._format_time()
-                    message = f"It's {current_time}. {item['message']}" if item['message'] else f"It's {current_time}"
-
-                    # Use media handler to play on media player
-                    await self.media_handler.play_on_media_player(
-                        media_player,
-                        message,
-                        item["is_alarm"]
-                    )
-
-                # Wait for completion or stop event
-                try:
-                    await asyncio.wait_for(stop_event.wait(), timeout=60)
-                    break
-                except asyncio.TimeoutError:
-                    # Check status before continuing
-                    if (item_id not in self._active_items or 
-                        self._active_items[item_id]["status"] != "active"):
-                        stop_event.set()
-                        break
-                    continue
-
-            except Exception as err:
-                _LOGGER.error("Error in media player playback loop: %s", err)
-                await asyncio.sleep(5)
-
-    async def _is_satellite_idle(self, satellite: str) -> bool:
-        """Check if satellite is idle."""
-        state = self.hass.states.get(f"assist_satellite.{satellite}")
-        return state.state == "idle" if state else True
-
-    async def _is_media_player_idle(self, media_player: str) -> bool:
-        """Check if media player is idle."""
-        state = self.hass.states.get(media_player)
-        return state.state in ["idle", "off"] if state else True
-
-    def _format_time(self) -> str:
-        """Format current time based on HA configuration."""
-        now = dt_util.now()
-        # Get time format from core config
-        time_format = self.hass.config.time_zone.endswith('12h')
-        return now.strftime("%I:%M %p") if time_format else now.strftime("%H:%M")
-
-    async def delete_item(self, item_id: str) -> None:
-        """Delete an alarm/reminder."""
-        if item_id in self._active_items:
-            # Stop if active
-            if item_id in self._stop_events:
-                self._stop_events[item_id].set()
-                del self._stop_events[item_id]
-            
-            # Remove from active items
-            del self._active_items[item_id]
-            
-            # Remove entity
-            self.hass.states.async_remove(f"{DOMAIN}.{item_id}")
-            
-            # Remove from storage
-            await self.storage.async_delete_item(item_id)
-            
-            # Update sensors
-            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+            _LOGGER.error("Error handling mobile notification action: %s", err, exc_info=True)
 
     async def stop_item(self, item_id: str, is_alarm: bool) -> None:
         """Stop an active or scheduled item."""
@@ -502,74 +425,56 @@ class AlarmAndReminderCoordinator:
             if item_id.startswith(f"{DOMAIN}."):
                 item_id = item_id.split(".")[-1]
 
-            _LOGGER.debug("Stop request for %s. Current active items: %s", 
-                         item_id, 
-                         {k: {'name': v.get('name'), 'status': v.get('status')} 
-                          for k, v in self._active_items.items()})
+            _LOGGER.debug("Stop request for %s. Current active items: %s", item_id, {k: {'name': v.get('name'), 'status': v.get('status')} for k, v in self._active_items.items()})
 
             # Try to find the item in active items or storage
             item = None
             if item_id in self._active_items:
                 item = self._active_items[item_id]
             else:
-                # Try to find in storage
-                stored_items = await self.storage.async_load()
-                if item_id in stored_items:
-                    item = stored_items[item_id]
+                stored = await self.storage.async_load()
+                if item_id in stored:
+                    item = stored[item_id]
                     self._active_items[item_id] = item
                     _LOGGER.debug("Restored item %s from storage", item_id)
 
-            if item:
-                # Verify item type matches
-                if item["is_alarm"] != is_alarm:
-                    _LOGGER.warning(
-                        "Attempted to stop %s with wrong service: %s", 
-                        "alarm" if item["is_alarm"] else "reminder",
-                        item_id
-                    )
-                    return
+            if not item:
+                _LOGGER.warning("Item %s not found in active items", item_id)
+                return
 
-                # Stop any active playback
-                if item_id in self._stop_events:
-                    self._stop_events[item_id].set()
-                    await asyncio.sleep(0.1)
-                    self._stop_events.pop(item_id)
+            if item.get("is_alarm") != is_alarm:
+                _LOGGER.warning("Attempted to stop %s with wrong service: %s", "alarm" if item.get("is_alarm") else "reminder", item_id)
+                return
 
-                # Cancel any scheduled triggers
-                for task in asyncio.all_tasks():
-                    if task.get_name() == f"trigger_{item_id}":
-                        task.cancel()
-                        _LOGGER.debug("Cancelled scheduled trigger for %s", item_id)
-                        break
+            # Set stop event if exists (playback loops check this)
+            if item_id in self._stop_events:
+                self._stop_events[item_id].set()
 
-                # Update item status
-                item["status"] = "stopped"
-                item["last_stopped"] = dt_util.now().isoformat()
-                self._active_items[item_id] = item
+            # Cancel playback task if running
+            for task in asyncio.all_tasks():
+                if task.get_name() == f"playback_{item_id}":
+                    task.cancel()
+                    _LOGGER.debug("Cancelled playback task for %s", item_id)
 
-                # Save to storage
-                await self.storage.async_save(self._active_items)
-                
-                # Update entity state
-                self.hass.states.async_set(
-                    f"{DOMAIN}.{item_id}",
-                    "stopped",
-                    item
-                )
+            # Cancel scheduled trigger task if exists
+            for task in asyncio.all_tasks():
+                if task.get_name() == f"trigger_{item_id}":
+                    task.cancel()
+                    _LOGGER.debug("Cancelled scheduled trigger for %s", item_id)
 
-                # Force update of sensors
-                self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+            # Update item status to stopped and persist
+            item["status"] = "stopped"
+            item["last_stopped"] = dt_util.now().isoformat()
+            self._active_items[item_id] = item
+            await self.storage.async_save(self._active_items)
 
-                _LOGGER.info(
-                    "Successfully stopped %s: %s", 
-                    "alarm" if is_alarm else "reminder",
-                    item_id
-                )
-            else:
-                _LOGGER.warning(
-                    "Item %s not found in active items or storage", 
-                    item_id
-                )
+            # Update entity state
+            state_data = dict(item)
+            if "scheduled_time" in state_data and isinstance(state_data["scheduled_time"], datetime):
+                state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
+            self.hass.states.async_set(f"{DOMAIN}.{item_id}", "stopped", state_data)
+            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+            _LOGGER.info("Successfully stopped %s: %s", "alarm" if is_alarm else "reminder", item_id)
 
         except Exception as err:
             _LOGGER.error("Error stopping item %s: %s", item_id, err, exc_info=True)

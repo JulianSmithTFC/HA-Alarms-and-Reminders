@@ -134,8 +134,10 @@ class AlarmReminderStorage:
         """Update a single item in storage."""
         try:
             async with self._lock:
-                self._items[item_id] = data
-                await self.async_save(self._items)
+                # Load current flattened items, update then save
+                current = await self.async_load()
+                current[item_id] = data
+                await self.async_save(current)
         except Exception as err:
             _LOGGER.error("Error updating item in storage: %s", err, exc_info=True)
 
@@ -143,69 +145,57 @@ class AlarmReminderStorage:
         """Delete an item from storage."""
         try:
             async with self._lock:
-                if item_id in self._items:
-                    del self._items[item_id]
-                    await self.async_save(self._items)
+                current = await self.async_load()
+                if item_id in current:
+                    del current[item_id]
+                    await self.async_save(current)
         except Exception as err:
             _LOGGER.error("Error deleting item from storage: %s", err, exc_info=True)
 
     async def async_load_items(self) -> None:
-        """Load items from storage and reschedule active ones."""
+        """Load items from storage and restore internal state (called at startup)."""
         try:
             self._active_items = await self.storage.async_load()
             _LOGGER.debug("Loaded items from storage: %s", self._active_items)
-            
-            # Process each item
-            now = dt_util.now()
+
+            # Rebuild used id sets (if you track them)
+            self._used_alarm_ids = {iid for iid, it in self._active_items.items() if it.get("is_alarm")}
+            self._used_reminder_ids = {iid for iid, it in self._active_items.items() if not it.get("is_alarm")}
+
+            # Recreate stop events for any active items
             for item_id, item in list(self._active_items.items()):
-                if item["status"] == "active":
-                    # Create stop event for active items
+                status = item.get("status", "scheduled")
+                # Normalize scheduled_time if it's a string
+                if "scheduled_time" in item and isinstance(item["scheduled_time"], str):
+                    item["scheduled_time"] = dt_util.parse_datetime(item["scheduled_time"])
+
+                if status == "active":
                     self._stop_events[item_id] = asyncio.Event()
-                    
-                    # Start playback for active items
-                    self.hass.async_create_task(
-                        self._start_playback(item_id),
-                        name=f"playback_{item_id}"
-                    )
-                
-                elif item["status"] == "scheduled":
-                    # Calculate delay and schedule
-                    scheduled_time = item["scheduled_time"]
-                    if scheduled_time > now:
-                        delay = (scheduled_time - now).total_seconds()
-                        self.hass.loop.call_later(
-                            delay,
-                            lambda: self.hass.async_create_task(
-                                self._trigger_item(item_id),
-                                name=f"trigger_{item_id}"
-                            )
-                        )
+                    # start playback in background
+                    self.hass.async_create_task(self._start_playback(item_id), name=f"playback_{item_id}")
+
+                elif status == "scheduled":
+                    now = dt_util.now()
+                    sched = item.get("scheduled_time")
+                    if not sched:
+                        continue
+                    # ensure datetime object
+                    if isinstance(sched, str):
+                        sched = dt_util.parse_datetime(sched)
+                        item["scheduled_time"] = sched
+                    delay = (sched - now).total_seconds()
+                    if delay <= 0:
+                        # If in past, optionally reschedule or trigger immediately; here trigger immediately
+                        self.hass.async_create_task(self._trigger_item(item_id))
                     else:
-                        # If scheduled time is in the past, reschedule for next occurrence
-                        if item.get("repeat") in ["daily", "weekdays", "weekends", "weekly"]:
-                            # Handle repeated items
-                            new_time = self._calculate_next_occurrence(item)
-                            if new_time:
-                                item["scheduled_time"] = new_time
-                                delay = (new_time - now).total_seconds()
-                                self.hass.loop.call_later(
-                                    delay,
-                                    lambda: self.hass.async_create_task(
-                                        self._trigger_item(item_id),
-                                        name=f"trigger_{item_id}"
-                                    )
-                                )
-                
-                # Create or update entity state
+                        # capture item_id in lambda default to avoid late binding
+                        self.hass.loop.call_later(delay, lambda iid=item_id: self.hass.async_create_task(self._trigger_item(iid)))
+
+                # Restore HA entity state for each item
                 state_data = dict(item)
-                if "scheduled_time" in state_data:
+                if "scheduled_time" in state_data and isinstance(state_data["scheduled_time"], datetime):
                     state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
-                
-                self.hass.states.async_set(
-                    f"{DOMAIN}.{item_id}",
-                    item["status"],
-                    state_data
-                )
+                self.hass.states.async_set(f"{DOMAIN}.{item_id}", item.get("status", "scheduled"), state_data)
 
         except Exception as err:
-            _LOGGER.error("Error loading items: %s", err, exc_info=True)
+            _LOGGER.error("Error loading items in coordinator: %s", err, exc_info=True)

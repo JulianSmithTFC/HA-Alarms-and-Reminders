@@ -189,12 +189,6 @@ stop_alarm:
       selector:
         entity:
           domain: alarms_and_reminders
-          filter:
-            state: 
-              - "active"
-              - "scheduled"
-            attributes:
-              is_alarm: true
 
 snooze_alarm:
   name: Snooze Alarm
@@ -217,11 +211,6 @@ snooze_alarm:
       selector:
         entity:
           domain: alarms_and_reminders
-          integration: alarms_and_reminders
-          filter:
-            state: active
-            attributes:
-              is_alarm: true
 
 stop_reminder:
   name: Stop Reminder
@@ -234,12 +223,6 @@ stop_reminder:
       selector:
         entity:
           domain: alarms_and_reminders
-          filter:
-            state: 
-              - "active"
-              - "scheduled"
-            attributes:
-              is_alarm: false
 
 snooze_reminder:
   name: Snooze Reminder
@@ -262,11 +245,6 @@ snooze_reminder:
       selector:
         entity:
           domain: alarms_and_reminders
-          integration: alarms_and_reminders
-          filter:
-            state: active
-            attributes:
-              is_alarm: false
 
 stop:
   name: Stop
@@ -325,9 +303,6 @@ edit_alarm:
       selector:
         entity:
           domain: alarms_and_reminders
-          filter:
-            attributes:
-              is_alarm: true
     time:
       name: Time
       description: New time for the alarm (HH:MM format)
@@ -379,9 +354,6 @@ edit_reminder:
       selector:
         entity:
           domain: alarms_and_reminders
-          filter:
-            attributes:
-              is_alarm: false
     time:
       name: Time
       description: New time for the reminder (HH:MM format)
@@ -433,9 +405,6 @@ delete_alarm:
       selector:
         entity:
           domain: alarms_and_reminders
-          filter:
-            attributes:
-              is_alarm: true
 
 delete_reminder:
   name: Delete Reminder
@@ -448,9 +417,6 @@ delete_reminder:
       selector:
         entity:
           domain: alarms_and_reminders
-          filter:
-            attributes:
-              is_alarm: false
 
 delete_all_alarms:
   name: Delete All Alarms
@@ -478,9 +444,6 @@ reschedule_alarm:
       selector:
         entity:
           domain: alarms_and_reminders
-          filter:
-            attributes:
-              is_alarm: true
     time:
       name: Time
       description: New time for the alarm (optional)
@@ -525,9 +488,6 @@ reschedule_reminder:
       selector:
         entity:
           domain: alarms_and_reminders
-          filter:
-            attributes:
-              is_alarm: false
     time:
       name: Time
       description: New time for the reminder (optional)

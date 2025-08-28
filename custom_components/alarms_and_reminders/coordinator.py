@@ -104,44 +104,42 @@ class AlarmAndReminderCoordinator:
             self._active_items = await self.storage.async_load()
             _LOGGER.debug("Loaded items from storage: %s", self._active_items)
 
-            # Rebuild used id sets (if you track them)
+            # Rebuild used id sets
             self._used_alarm_ids = {iid for iid, it in self._active_items.items() if it.get("is_alarm")}
             self._used_reminder_ids = {iid for iid, it in self._active_items.items() if not it.get("is_alarm")}
 
             # Recreate stop events for any active items
             for item_id, item in list(self._active_items.items()):
                 status = item.get("status", "scheduled")
+
                 # Normalize scheduled_time if it's a string
                 if "scheduled_time" in item and isinstance(item["scheduled_time"], str):
                     item["scheduled_time"] = dt_util.parse_datetime(item["scheduled_time"])
 
+                # Ensure scheduled_time is a datetime for scheduling
+                sched = item.get("scheduled_time")
                 if status == "active":
+                    # recreate stop event and resume playback
                     self._stop_events[item_id] = asyncio.Event()
-                    # start playback in background
                     self.hass.async_create_task(self._start_playback(item_id), name=f"playback_{item_id}")
 
-                elif status == "scheduled":
-                    now = dt_util.now()
-                    sched = item.get("scheduled_time")
-                    if not sched:
-                        continue
-                    # ensure datetime object
+                elif status == "scheduled" and sched:
                     if isinstance(sched, str):
                         sched = dt_util.parse_datetime(sched)
                         item["scheduled_time"] = sched
                     delay = (sched - now).total_seconds()
                     if delay <= 0:
-                        # If in past, optionally reschedule or trigger immediately; here trigger immediately
+                        # scheduled time is past — trigger immediately (or reschedule according to repeat)
                         self.hass.async_create_task(self._trigger_item(item_id))
                     else:
-                        # capture item_id in lambda default to avoid late binding
+                        # capture item_id properly in lambda to avoid late binding
                         self.hass.loop.call_later(delay, lambda iid=item_id: self.hass.async_create_task(self._trigger_item(iid)))
 
-            # Restore HA entity state for each item
-            state_data = dict(item)
-            if "scheduled_time" in state_data and isinstance(state_data["scheduled_time"], datetime):
-                state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
-            self.hass.states.async_set(f"{DOMAIN}.{item_id}", item.get("status", "scheduled"), state_data)
+                # Restore entity state for this item (inside loop)
+                state_data = dict(item)
+                if "scheduled_time" in state_data and isinstance(state_data["scheduled_time"], datetime):
+                    state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
+                self.hass.states.async_set(f"{DOMAIN}.{item_id}", status, state_data)
 
         except Exception as err:
             _LOGGER.error("Error loading items in coordinator: %s", err, exc_info=True)

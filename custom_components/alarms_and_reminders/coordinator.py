@@ -6,9 +6,8 @@ from datetime import datetime, timedelta
 import re
 
 from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers import entity_registry as er
 from .const import DOMAIN
 from .entity import AlarmReminderEntity
 from .storage import AlarmReminderStorage
@@ -101,6 +100,7 @@ class AlarmAndReminderCoordinator:
     async def async_load_items(self) -> None:
         """Load items from storage and restore internal state (called at startup)."""
         try:
+            # Flattened mapping: item_id -> item dict
             self._active_items = await self.storage.async_load()
             _LOGGER.debug("Loaded items from storage: %s", self._active_items)
 
@@ -108,38 +108,48 @@ class AlarmAndReminderCoordinator:
             self._used_alarm_ids = {iid for iid, it in self._active_items.items() if it.get("is_alarm")}
             self._used_reminder_ids = {iid for iid, it in self._active_items.items() if not it.get("is_alarm")}
 
-            # Recreate stop events for any active items
-            for item_id, item in list(self._active_items.items()):
-                status = item.get("status", "scheduled")
+            now = dt_util.now()
 
-                # Normalize scheduled_time if it's a string
+            for item_id, item in list(self._active_items.items()):
+                # Normalize scheduled_time if string
                 if "scheduled_time" in item and isinstance(item["scheduled_time"], str):
                     item["scheduled_time"] = dt_util.parse_datetime(item["scheduled_time"])
 
-                # Ensure scheduled_time is a datetime for scheduling
-                sched = item.get("scheduled_time")
-                if status == "active":
-                    # recreate stop event and resume playback
-                    self._stop_events[item_id] = asyncio.Event()
-                    self.hass.async_create_task(self._start_playback(item_id), name=f"playback_{item_id}")
+                status = item.get("status", "scheduled")
 
-                elif status == "scheduled" and sched:
-                    if isinstance(sched, str):
-                        sched = dt_util.parse_datetime(sched)
-                        item["scheduled_time"] = sched
-                    delay = (sched - now).total_seconds()
-                    if delay <= 0:
-                        # scheduled time is past — trigger immediately (or reschedule according to repeat)
-                        self.hass.async_create_task(self._trigger_item(item_id))
-                    else:
-                        # capture item_id properly in lambda to avoid late binding
-                        self.hass.loop.call_later(delay, lambda iid=item_id: self.hass.async_create_task(self._trigger_item(iid)))
-
-                # Restore entity state for this item (inside loop)
+                # Restore entity state in HA
                 state_data = dict(item)
                 if "scheduled_time" in state_data and isinstance(state_data["scheduled_time"], datetime):
                     state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
+
                 self.hass.states.async_set(f"{DOMAIN}.{item_id}", status, state_data)
+
+                # Recreate stop events and resume if active
+                if status == "active":
+                    self._stop_events[item_id] = asyncio.Event()
+                    # resume playback in background
+                    self.hass.async_create_task(self._start_playback(item_id), name=f"playback_{item_id}")
+
+                # Schedule future triggers for scheduled items
+                elif status == "scheduled" and item.get("scheduled_time"):
+                    sched = item["scheduled_time"]
+                    if isinstance(sched, str):
+                        sched = dt_util.parse_datetime(sched)
+                        item["scheduled_time"] = sched
+
+                    # schedule using async_track_point_in_time to avoid call-later late-binding issues
+                    if isinstance(sched, datetime):
+                        if sched <= now:
+                            # If time already passed, trigger immediately (or implement repeat logic)
+                            self.hass.async_create_task(self._trigger_item(item_id))
+                        else:
+                            # capture item_id via closure default
+                            def _cb(iid=item_id):
+                                self.hass.async_create_task(self._trigger_item(iid))
+                            async_track_point_in_time(self.hass, lambda now_dt, iid=item_id: self.hass.async_create_task(self._trigger_item(iid)), sched)
+
+            # Fire bus update so other platforms (switch) can build entities
+            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
 
         except Exception as err:
             _LOGGER.error("Error loading items in coordinator: %s", err, exc_info=True)

@@ -8,6 +8,7 @@ import re
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
+from homeassistant.helpers import entity_registry as er
 from .const import DOMAIN
 from .entity import AlarmReminderEntity
 from .storage import AlarmReminderStorage

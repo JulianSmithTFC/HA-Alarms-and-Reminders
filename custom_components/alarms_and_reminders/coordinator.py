@@ -871,3 +871,67 @@ class AlarmAndReminderCoordinator:
 
         except Exception as err:
             _LOGGER.error("Error rescheduling item %s: %s", item_id, err, exc_info=True)
+
+    async def _satellite_playback_loop(self, item: dict, stop_event: asyncio.Event) -> None:
+        """Playback loop for announce-on-satellite targets."""
+        try:
+            # announcer.announce_on_satellite handles its own loop and stop_event
+            satellite = item.get("satellite")
+            if not satellite:
+                _LOGGER.debug("No satellite configured for item")
+                return
+
+            await self.announcer.announce_on_satellite(
+                satellite=satellite,
+                message=item.get("message", ""),
+                sound_file=item.get("sound_file"),
+                stop_event=stop_event,
+                name=item.get("name"),
+                is_alarm=item.get("is_alarm", False)
+            )
+
+        except Exception as err:
+            _LOGGER.error("Satellite playback error for %s: %s", item.get("entity_id", "<unknown>"), err, exc_info=True)
+            # mark item as error so storage doesn't crash and persist
+            try:
+                item_id = item.get("entity_id") or item.get("unique_id")
+                if item_id:
+                    item["status"] = "error"
+                    self._active_items[item_id] = item
+                    await self.storage.async_save(self._active_items)
+                    self.hass.states.async_set(f"{DOMAIN}.{item_id}", "error", item)
+                    self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+            except Exception:
+                _LOGGER.exception("Failed to persist error state")
+
+    async def _media_player_playback_loop(self, item: dict, stop_event: asyncio.Event) -> None:
+        """Playback loop for media_player targets."""
+        try:
+            media_players = item.get("media_players", []) or []
+            if not media_players:
+                _LOGGER.debug("No media players configured for item")
+                return
+
+            # Play on each media player sequentially until stopped
+            for mp in media_players:
+                if stop_event.is_set():
+                    break
+                # play_on_media_player already blocks until playback done
+                await self.media_handler.play_on_media_player(mp, item.get("message", ""), item.get("is_alarm", False))
+                # check stop_event between players
+                if stop_event.is_set():
+                    break
+
+        except Exception as err:
+            _LOGGER.error("Media player playback error for %s: %s", item.get("entity_id", "<unknown>"), err, exc_info=True)
+            # persist error status
+            try:
+                item_id = item.get("entity_id") or item.get("unique_id")
+                if item_id:
+                    item["status"] = "error"
+                    self._active_items[item_id] = item
+                    await self.storage.async_save(self._active_items)
+                    self.hass.states.async_set(f"{DOMAIN}.{item_id}", "error", item)
+                    self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+            except Exception:
+                _LOGGER.exception("Failed to persist error state")

@@ -90,16 +90,19 @@ class AlarmReminderStorage:
         try:
             async with self._lock:
                 # Organize items by type and status
+                # Include 'error' bucket to avoid KeyError when items enter error state
                 organized = {
                     "alarms": {
                         "active": {},
                         "scheduled": {},
-                        "stopped": {}
+                        "stopped": {},
+                        "error": {}
                     },
                     "reminders": {
                         "active": {},
                         "scheduled": {},
-                        "stopped": {}
+                        "stopped": {},
+                        "error": {}
                     }
                 }
 
@@ -115,6 +118,11 @@ class AlarmReminderStorage:
                     # Sort into correct category
                     item_type = "alarms" if data.get("is_alarm") else "reminders"
                     status = data.get("status", "scheduled")
+                    # Normalize unknown statuses to 'stopped' (safe fallback) or keep 'error'
+                    if status not in organized[item_type]:
+                        # If status looks like an unexpected runtime state, send to 'error' bucket,
+                        # otherwise fallback to 'stopped'
+                        status = "error" if status == "error" else "stopped"
                     organized[item_type][status][item_id] = storage_data
 
                 # Save alarms

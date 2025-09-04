@@ -1,14 +1,18 @@
 """Coordinator for scheduling alarms and reminders."""
 import logging
-from typing import Dict, Any
-import asyncio
-from datetime import datetime, timedelta
 import re
+from typing import Dict, Any
+from datetime import datetime, timedelta
+import asyncio
 
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers import entity_registry as er
+
+# Add missing constants import
+from .const import DOMAIN, DEFAULT_SNOOZE_MINUTES, DEFAULT_NAME
+
 from .storage import AlarmReminderStorage
 
 _LOGGER = logging.getLogger(__name__)

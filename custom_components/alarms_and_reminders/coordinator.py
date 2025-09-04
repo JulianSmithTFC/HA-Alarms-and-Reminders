@@ -8,9 +8,8 @@ import asyncio
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
-from homeassistant.helpers import entity_registry as er
+from datetime import datetime, timedelta
 
-# Add missing constants import
 from .const import DOMAIN, DEFAULT_SNOOZE_MINUTES, DEFAULT_NAME
 
 from .storage import AlarmReminderStorage
@@ -158,83 +157,38 @@ class AlarmAndReminderCoordinator:
             _LOGGER.error("Error loading items in coordinator: %s", err, exc_info=True)
         
     async def schedule_item(self, call: ServiceCall, is_alarm: bool, target: dict) -> None:
-        """Schedule an alarm or reminder."""
+        """Schedule an alarm or reminder (moved from sensor)."""
         try:
-            _LOGGER.debug("Scheduling %s with data: %s", 
-                         "alarm" if is_alarm else "reminder", 
-                         call.data)
-            
-            # Handle item naming with proper ID generation
-            provided_name = call.data.get("name", "").strip()
-            
-            if is_alarm:
-                # For alarms: generate ID if no name provided
-                if not provided_name:
-                    item_name = self._get_next_available_id("alarm")
-                    display_name = item_name
-                else:
-                    # Use provided name but ensure unique ID
-                    safe_name = re.sub(r'[^a-z0-9_]', '_', provided_name.lower())
-                    item_name = self._get_next_available_id(safe_name)
-                    display_name = provided_name
-            else:
-                # For reminders: name is required
-                if not provided_name:
-                    _LOGGER.error("Name is required for reminders")
-                    return
-                # Use provided name directly for reminders
-                safe_name = re.sub(r'[^a-z0-9_]', '_', provided_name.lower())
-                item_name = safe_name
-                display_name = provided_name
-                # Check if reminder name already exists
-                if item_name in self._active_items:
-                    _LOGGER.error("A reminder with name '%s' already exists", provided_name)
-                    return
+            now = dt_util.now()
 
-            time_input = call.data.get("time")
-            date_input = call.data.get("date")
+            # parse inputs (time/date/message/repeat etc.) - adapt to your service schema keys
+            time_input = call.data.get("time")  # expected as time object or "HH:MM"
+            date_input = call.data.get("date")  # optional date object
             message = call.data.get("message", "")
+            display_name = call.data.get("name") or f"{'alarm' if is_alarm else 'reminder'}_{int(now.timestamp())}"
             repeat = call.data.get("repeat", "once")
             repeat_days = call.data.get("repeat_days", [])
+            item_name = display_name.replace(" ", "_")
 
-            # Convert time input to datetime
-            now = dt_util.now()
+            # compute scheduled_time
             if isinstance(time_input, str):
-                try:
-                    hour, minute = map(int, time_input.split(':'))
-                    time_input = datetime.time(hour, minute)
-                except ValueError as err:
-                    _LOGGER.error("Invalid time format: %s", err)
-                    return
+                hh, mm = map(int, time_input.split(":"))
+                time_obj = datetime(now.year, now.month, now.day, hh, mm).time()
+            else:
+                time_obj = time_input
 
             if date_input:
-                scheduled_time = datetime.combine(date_input, time_input)
-                scheduled_time = dt_util.as_local(scheduled_time)
+                scheduled_time = datetime.combine(date_input, time_obj)
             else:
-                scheduled_time = datetime.combine(now.date(), time_input)
-                scheduled_time = dt_util.as_local(scheduled_time)
+                scheduled_time = datetime.combine(now.date(), time_obj)
                 if scheduled_time < now:
                     scheduled_time = scheduled_time + timedelta(days=1)
 
-            delay = (scheduled_time - now).total_seconds()
-            if delay < 0:
-                _LOGGER.warning("Scheduled time %s is in the past. Ignoring request.", scheduled_time)
-                return
+            scheduled_time = dt_util.as_local(scheduled_time)
 
-            # Create entity_id and store item
-            entity_id = f"{DOMAIN}.{item_name}"
-            
-            # Create stop event
-            self._stop_events[item_name] = asyncio.Event()
-            
-            # Get sound file from service call or use default
-            sound_file = call.data.get(
-                "sound_file", 
-                self.media_handler.alarm_sound if is_alarm else self.media_handler.reminder_sound
-            )
-
-            # Create item data with all necessary fields
-            item_data = {
+            # Build item dict
+            item_id = item_name
+            item = {
                 "scheduled_time": scheduled_time,
                 "satellite": target.get("satellite"),
                 "media_players": target.get("media_players", []),
@@ -244,32 +198,36 @@ class AlarmAndReminderCoordinator:
                 "repeat_days": repeat_days,
                 "status": "scheduled",
                 "name": display_name,
-                "entity_id": item_name,
-                "unique_id": item_name,
-                "sound_file": sound_file  
+                "entity_id": item_id,
+                "unique_id": item_id,
+                "enabled": True,
+                "sound_file": call.data.get("sound_file")
             }
-            
-            # Store in active items and save to storage
-            self._active_items[item_name] = item_data
+
+            # Save and put into memory
+            self._active_items[item_id] = item
             await self.storage.async_save(self._active_items)
-            
-            # Create and register entity state with datetime conversion
-            state_data = dict(item_data)
-            state_data["scheduled_time"] = item_data["scheduled_time"].isoformat()
-            self.hass.states.async_set(entity_id, "scheduled", state_data)
 
-            # Entity objects are provided by the switch platform (switch.py).
-            # The switch platform will pick up this item via hass.bus events and hass.data[DOMAIN]["coordinator"].
-            _LOGGER.debug("Created item %s with data: %s", item_name, item_data)
-            _LOGGER.debug("Active items after creation: %s", self._active_items)
+            # Create HA state for the item (serialize datetime)
+            state_data = dict(item)
+            if isinstance(state_data.get("scheduled_time"), datetime):
+                state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
+            self.hass.states.async_set(f"{DOMAIN}.{item_id}", "scheduled", state_data)
 
-            # Schedule the action
-            self.hass.loop.call_later(
-                delay,
-                lambda: self.hass.async_create_task(self._trigger_item(item_name))
+            # Fire event so switch platform can add/update entities
+            self.hass.bus.async_fire(f"{DOMAIN}_state_changed", {"entity_id": f"{DOMAIN}.{item_id}"})
+
+            # Schedule the trigger with async_track_point_in_time (avoids late-binding)
+            def _call_trigger(iid=item_id):
+                self.hass.async_create_task(self._trigger_item(iid))
+
+            async_track_point_in_time(
+                self.hass,
+                lambda now_dt, iid=item_id: self.hass.async_create_task(self._trigger_item(iid)),
+                scheduled_time
             )
 
-            return item_name
+            _LOGGER.info("Scheduled %s %s for %s", "alarm" if is_alarm else "reminder", item_id, scheduled_time)
 
         except Exception as err:
             _LOGGER.error("Error scheduling: %s", err, exc_info=True)

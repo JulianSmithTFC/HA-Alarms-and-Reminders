@@ -82,8 +82,10 @@ class AlarmItemSwitch(SwitchEntity):
     @property
     def device_info(self):
         """Return device info so all switches are grouped under one integration device."""
+        # Use the coordinator id (set to the config entry id) for grouping under the device created in __init__.py
+        device_id = getattr(self.coordinator, "id", "controller")
         return {
-            "identifiers": {(DOMAIN, "controller")},
+            "identifiers": {(DOMAIN, device_id)},
             "name": DEFAULT_NAME,
             "manufacturer": "Alarms and Reminders",
             "model": "alarms_and_reminders",

@@ -51,7 +51,8 @@ from .coordinator import AlarmAndReminderCoordinator
 from .media_player import MediaHandler
 from .announcer import Announcer
 from .intents import async_setup_intents
-from .sensor import async_setup_entry as async_setup_sensor_entry
+# from .sensor import async_setup_entry as async_setup_sensor_entry
+# sensor platform removed; scheduling moved to coordinator and switches
 
 __all__ = ["AlarmAndReminderCoordinator"]
 

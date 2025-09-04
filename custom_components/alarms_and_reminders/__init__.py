@@ -89,7 +89,7 @@ async def _get_satellites(hass: HomeAssistant) -> list:
         _LOGGER.error("Error getting satellites list: %s", err, exc_info=True)
         return []
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["switch"]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Alarms and Reminders integration."""
@@ -741,12 +741,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "entities": []
         }
 
-        # Forward setup to platforms
+        # Forward the switch platform so switches are created
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        
-        # Set up update listener
-        entry.async_on_unload(entry.add_update_listener(update_listener))
-        
+
         return True
 
     except Exception as err:

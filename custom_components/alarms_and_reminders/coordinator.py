@@ -9,8 +9,6 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers import entity_registry as er
-from .const import DOMAIN
-from .entity import AlarmReminderEntity
 from .storage import AlarmReminderStorage
 
 _LOGGER = logging.getLogger(__name__)
@@ -255,20 +253,9 @@ class AlarmAndReminderCoordinator:
             state_data = dict(item_data)
             state_data["scheduled_time"] = item_data["scheduled_time"].isoformat()
             self.hass.states.async_set(entity_id, "scheduled", state_data)
-            
-            # Create entity object
-            entity = AlarmReminderEntity(self.hass, item_name, item_data)
-            
-            # Store in HA registry using the new method
-            entity_registry = er.async_get(self.hass)
-            entity_registry.async_get_or_create(
-                domain=DOMAIN,
-                platform="alarms_and_reminders",
-                unique_id=item_name,
-                suggested_object_id=item_name,
-                original_name=display_name
-            )
 
+            # Entity objects are provided by the switch platform (switch.py).
+            # The switch platform will pick up this item via hass.bus events and hass.data[DOMAIN]["coordinator"].
             _LOGGER.debug("Created item %s with data: %s", item_name, item_data)
             _LOGGER.debug("Active items after creation: %s", self._active_items)
 

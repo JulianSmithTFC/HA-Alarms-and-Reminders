@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import ATTR_NAME  # Use HA's built-in ATTR_NAME
+from homeassistant.helpers import device_registry as dr
 
 from .const import (
     DOMAIN,
@@ -730,6 +731,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         announcer = Announcer(hass)
         coordinator = AlarmAndReminderCoordinator(
             hass, media_handler, announcer
+        )
+
+        # attach an id for device registry / grouping (use the config_entry id)
+        coordinator.id = entry.entry_id
+
+        # Create device in device registry so switches appear under a device
+        device_registry = dr.async_get(hass)
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, coordinator.id)},
+            name="Alarms and Reminders",
+            model="Alarms and Reminders",
+            sw_version="1.0.7",
+            manufacturer="@omaramin-2000",
         )
 
         # Load saved items

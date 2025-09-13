@@ -10,7 +10,8 @@ from datetime import time, datetime
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.typing import ConfigType, AddEntitiesCallback
+from homeassistant.helpers.typing import ConfigType
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.const import ATTR_NAME  # Use HA's built-in ATTR_NAME
 from homeassistant.helpers import device_registry as dr
 

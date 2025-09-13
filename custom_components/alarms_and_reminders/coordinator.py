@@ -172,9 +172,18 @@ class AlarmAndReminderCoordinator:
 
             # compute scheduled_time
             if isinstance(time_input, str):
-                hh, mm = map(int, time_input.split(":"))
-                time_obj = datetime(now.year, now.month, now.day, hh, mm).time()
+                # Accept "HH:MM", "HH:MM:SS", or ISO datetime "YYYY-MM-DDTHH:MM:SS"
+                # Use Home Assistant dt_util.parse_time on the time portion
+                time_str = time_input.split("T")[-1]
+                parsed = dt_util.parse_time(time_str)
+                if parsed is None:
+                    _LOGGER.error("Invalid time format provided: %s", time_input)
+                    raise ValueError(f"Invalid time format: {time_input}")
+                time_obj = parsed
+            elif isinstance(time_input, datetime):
+                time_obj = time_input.time()
             else:
+                # assume it's already a time object
                 time_obj = time_input
 
             if date_input:

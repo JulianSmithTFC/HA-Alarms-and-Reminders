@@ -759,7 +759,49 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if hasattr(coordinator, "async_load_items"):
             await coordinator.async_load_items()
 
-        # Forward platforms (switch)
+        # --- Service handlers (ensure services.yaml remains for UI metadata) ---
+        async def _handle_set_alarm(call: ServiceCall) -> None:
+            await coordinator.schedule_item(call, True, {
+                "satellite": call.data.get("satellite"),
+                "media_players": ([call.data.get("media_player")] if call.data.get("media_player") else [])
+            })
+
+        async def _handle_set_reminder(call: ServiceCall) -> None:
+            await coordinator.schedule_item(call, False, {
+                "satellite": call.data.get("satellite"),
+                "media_players": ([call.data.get("media_player")] if call.data.get("media_player") else [])
+            })
+
+        async def _handle_stop(call: ServiceCall) -> None:
+            # target can be an entity_id or alarm_id field; adapt to your coordinator API
+            target = (call.data.get("alarm_id") or call.data.get("reminder_id") or
+                      (call.target and call.target.get("entity_id")))
+            if target:
+                await coordinator.stop_item(target if isinstance(target, str) else target[0])
+
+        async def _handle_snooze(call: ServiceCall) -> None:
+            minutes = call.data.get("minutes", 5)
+            target = (call.data.get("alarm_id") or call.data.get("reminder_id") or
+                      (call.target and call.target.get("entity_id")))
+            if target:
+                await coordinator.snooze_item(target if isinstance(target, str) else target[0], minutes)
+
+        async def _handle_delete(call: ServiceCall) -> None:
+            target = (call.data.get("alarm_id") or call.data.get("reminder_id") or
+                      (call.target and call.target.get("entity_id")))
+            if target:
+                await coordinator.delete_item(target if isinstance(target, str) else target[0])
+
+        # Register services under your domain (these names match services.yaml)
+        hass.services.async_register(DOMAIN, "set_alarm", _handle_set_alarm)
+        hass.services.async_register(DOMAIN, "set_reminder", _handle_set_reminder)
+        hass.services.async_register(DOMAIN, "stop", _handle_stop)
+        hass.services.async_register(DOMAIN, "snooze", _handle_snooze)
+        hass.services.async_register(DOMAIN, "delete", _handle_delete)
+        # ...register other services (reschedule, edit, stop_all, etc.) similarly...
+        # -----------------------------------------------------------------------
+
+        # Forward platforms and finish setup
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         return True
 

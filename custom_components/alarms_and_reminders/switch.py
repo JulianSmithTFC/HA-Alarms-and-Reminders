@@ -17,8 +17,18 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
-    """Set up switches for each saved alarm/reminder."""
-    coordinator: AlarmAndReminderCoordinator = hass.data[DOMAIN]["coordinator"]
+    """Set up switches for each saved alarm/reminder for this config entry."""
+    # Per-entry storage: coordinator is stored under hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if not entry_data:
+        _LOGGER.error("No data found for entry %s", entry.entry_id)
+        return
+
+    coordinator: AlarmAndReminderCoordinator = entry_data.get("coordinator")
+    if not coordinator:
+        _LOGGER.error("Coordinator not found for entry %s", entry.entry_id)
+        return
+
     entities: List[AlarmItemSwitch] = []
 
     # Build initial switches from currently loaded items

@@ -190,11 +190,14 @@ class AlarmAndReminderCoordinator:
                 scheduled_time = datetime.combine(date_input, time_obj)
             else:
                 scheduled_time = datetime.combine(now.date(), time_obj)
-                if scheduled_time < now:
+                # Make scheduled_time timezone-aware in Home Assistant's local timezone
+                # dt_util.as_local will return an aware datetime; do this before any comparisons to now
+                scheduled_time = dt_util.as_local(scheduled_time)
+
+                # If the computed time is already in the past, push to next day
+                if scheduled_time <= now:
                     scheduled_time = scheduled_time + timedelta(days=1)
-
-            scheduled_time = dt_util.as_local(scheduled_time)
-
+ 
             # Build item dict
             item_id = item_name
             item = {

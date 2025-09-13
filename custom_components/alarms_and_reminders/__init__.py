@@ -720,23 +720,23 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         _LOGGER.error("Error setting up integration: %s", err, exc_info=True)
         return False
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
-    """Set up switches for each saved alarm/reminder."""
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up a config entry: store coordinator reference and forward platforms."""
+    try:
+        entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if not entry_data or "coordinator" not in entry_data:
+            _LOGGER.error("Coordinator not found for entry %s", entry.entry_id)
+            return False
 
-    # Look up coordinator for this config entry (stored by async_setup_entry in __init__.py)
-    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    if not entry_data or "coordinator" not in entry_data:
-        _LOGGER.error("Coordinator not found for entry %s", entry.entry_id)
-        return
+        # Coordinator stored during initial setup
+        coordinator: AlarmAndReminderCoordinator = entry_data["coordinator"]
 
-    coordinator: AlarmAndReminderCoordinator = entry_data["coordinator"]
-    entities: List[AlarmItemSwitch] = []
-
-    # Build initial switches from currently loaded items
-    for item_id in coordinator._active_items.keys():
-        entities.append(AlarmItemSwitch(coordinator, item_id))
-
-    async_add_entities(entities, True)
+        # Forward platforms (switch). Tests patch this call.
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        return True
+    except Exception as err:
+        _LOGGER.error("Error setting up entry: %s", err, exc_info=True)
+        return False
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""

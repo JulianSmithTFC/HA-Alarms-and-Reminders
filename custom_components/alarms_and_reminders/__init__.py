@@ -720,51 +720,23 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         _LOGGER.error("Error setting up integration: %s", err, exc_info=True)
         return False
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up a config entry: create coordinator, device and forward platforms."""
-    try:
-        # Ensure top-level container for this integration
-        hass.data.setdefault(DOMAIN, {})
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
+    """Set up switches for each saved alarm/reminder."""
 
-        # Prepare media / announcer instances (real runtime objects; tests patch coordinator constructor)
-        sounds_dir = Path(__file__).parent / "sounds"
-        media_handler = MediaHandler(
-            hass,
-            str(sounds_dir / "alarms" / "birds.mp3"),
-            str(sounds_dir / "reminders" / "ringtone.mp3"),
-        )
-        announcer = Announcer(hass)
+    # Look up coordinator for this config entry (stored by async_setup_entry in __init__.py)
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if not entry_data or "coordinator" not in entry_data:
+        _LOGGER.error("Coordinator not found for entry %s", entry.entry_id)
+        return
 
-        # Create coordinator (tests patch AlarmAndReminderCoordinator to return a mock)
-        coordinator = AlarmAndReminderCoordinator(hass, media_handler, announcer)
+    coordinator: AlarmAndReminderCoordinator = entry_data["coordinator"]
+    entities: List[AlarmItemSwitch] = []
 
-        # Attach stable id and create a device so switches group under one device
-        coordinator.id = entry.entry_id
-        device_registry = dr.async_get(hass)
-        device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, coordinator.id)},
-            name="Alarms and Reminders",
-            model="Alarms and Reminders",
-            sw_version="0.0.0",
-            manufacturer="@omaramin-2000",
-        )
+    # Build initial switches from currently loaded items
+    for item_id in coordinator._active_items.keys():
+        entities.append(AlarmItemSwitch(coordinator, item_id))
 
-        # Load saved items (coordinator should implement async_load_items)
-        if hasattr(coordinator, "async_load_items"):
-            await coordinator.async_load_items()
-
-        # Store coordinator per-entry so platforms pick it up
-        hass.data[DOMAIN].setdefault(entry.entry_id, {})["coordinator"] = coordinator
-
-        # Forward configured platforms (switch)
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-        return True
-
-    except Exception as err:
-        _LOGGER.error("Error setting up config entry: %s", err, exc_info=True)
-        return False
+    async_add_entities(entities, True)
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""

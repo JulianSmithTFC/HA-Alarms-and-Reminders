@@ -721,21 +721,50 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         return False
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up a config entry: store coordinator reference and forward platforms."""
+    """Set up a config entry: create/store coordinator and forward platforms."""
     try:
-        entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-        if not entry_data or "coordinator" not in entry_data:
-            _LOGGER.error("Coordinator not found for entry %s", entry.entry_id)
-            return False
+        hass.data.setdefault(DOMAIN, {})
+        # Ensure per-entry container
+        hass.data[DOMAIN].setdefault(entry.entry_id, {})
+        entry_store = hass.data[DOMAIN][entry.entry_id]
 
-        # Coordinator stored during initial setup
-        coordinator: AlarmAndReminderCoordinator = entry_data["coordinator"]
+        # Create media/announcer and coordinator (tests patch AlarmAndReminderCoordinator)
+        sounds_dir = Path(__file__).parent / "sounds"
+        media_handler = MediaHandler(
+            hass,
+            str(sounds_dir / "alarms" / "birds.mp3"),
+            str(sounds_dir / "reminders" / "ringtone.mp3"),
+        )
+        announcer = Announcer(hass)
 
-        # Forward platforms (switch). Tests patch this call.
+        coordinator = AlarmAndReminderCoordinator(hass, media_handler, announcer)
+
+        # Attach stable id and create device so switches group under one device
+        coordinator.id = entry.entry_id
+        device_registry = dr.async_get(hass)
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, coordinator.id)},
+            name="Alarms and Reminders",
+            model="Alarms and Reminders",
+            sw_version="0.0.0",
+            manufacturer="@omaramin-2000",
+        )
+
+        # Store coordinator and entities list for this entry
+        entry_store["coordinator"] = coordinator
+        entry_store.setdefault("entities", [])
+
+        # Let coordinator restore saved items if it supports it
+        if hasattr(coordinator, "async_load_items"):
+            await coordinator.async_load_items()
+
+        # Forward platforms (switch)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         return True
+
     except Exception as err:
-        _LOGGER.error("Error setting up entry: %s", err, exc_info=True)
+        _LOGGER.error("Error setting up config entry: %s", err, exc_info=True)
         return False
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -37,35 +37,48 @@ class AlarmAndReminderCoordinator:
         _LOGGER.debug("Starting to load existing items")
         try:
             for state in hass.states.async_all():
-                if state.entity_id.startswith(f"{DOMAIN}."):
-                    item_id = state.entity_id.split(".")[-1]
-                    _LOGGER.debug("Found entity: %s with state: %s and attributes: %s", 
-                                 state.entity_id, state.state, state.attributes)
-                    
-                    # Convert the scheduled_time back to datetime if it exists
-                    attributes = dict(state.attributes)
-                    if "scheduled_time" in attributes:
-                        try:
-                            if isinstance(attributes["scheduled_time"], str):
-                                attributes["scheduled_time"] = dt_util.parse_datetime(
-                                    attributes["scheduled_time"]
-                                )
-                        except Exception as err:
-                            _LOGGER.error("Error parsing scheduled_time: %s", err)
-                    
-                    self._active_items[item_id] = attributes
-                    if state.state == "active":
-                        self._stop_events[item_id] = asyncio.Event()
-                    
-                    # Update counters
-                    if attributes.get("is_alarm"):
+                if not state.entity_id.startswith(f"{DOMAIN}."):
+                    continue
+
+                item_id = state.entity_id.split(".")[-1]
+                _LOGGER.debug(
+                    "Found entity: %s with state: %s and attributes: %s",
+                    state.entity_id,
+                    state.state,
+                    state.attributes,
+                )
+
+                # Convert the scheduled_time back to datetime if it exists
+                attributes = dict(state.attributes)
+                if "scheduled_time" in attributes:
+                    try:
+                        if isinstance(attributes["scheduled_time"], str):
+                            attributes["scheduled_time"] = dt_util.parse_datetime(
+                                attributes["scheduled_time"]
+                            )
+                    except Exception as err:
+                        _LOGGER.error("Error parsing scheduled_time: %s", err)
+
+                self._active_items[item_id] = attributes
+                if state.state == "active":
+                    self._stop_events[item_id] = asyncio.Event()
+
+                # Update counters for alarm ids like alarm_1, alarm_2...
+                if attributes.get("is_alarm"):
+                    try:
                         counter_num = int(item_id.split("_")[-1]) if item_id.startswith("alarm_") else 0
-                        self._alarm_counter = max(self._alarm_counter, counter_num)
-                    
-                    _LOGGER.debug("Loaded item: %s with attributes: %s", 
-                                item_id, self._active_items[item_id])
-            
+                    except Exception:
+                        counter_num = 0
+                    self._alarm_counter = max(self._alarm_counter, counter_num)
+
+                _LOGGER.debug(
+                    "Loaded item: %s with attributes: %s",
+                    item_id,
+                    self._active_items[item_id],
+                )
+
             _LOGGER.debug("Finished loading items. Active items: %s", self._active_items)
+
         except Exception as err:
             _LOGGER.error("Error loading existing items: %s", err, exc_info=True)
         
@@ -162,18 +175,31 @@ class AlarmAndReminderCoordinator:
             now = dt_util.now()
 
             # parse inputs (time/date/message/repeat etc.) - adapt to your service schema keys
-            time_input = call.data.get("time")  # expected as time object or "HH:MM"
+            time_input = call.data.get("time")  # expected as time object or "HH:MM" or ISO
             date_input = call.data.get("date")  # optional date object
             message = call.data.get("message", "")
-            display_name = call.data.get("name") or f"{'alarm' if is_alarm else 'reminder'}_{int(now.timestamp())}"
+
+            # If user supplied a name use it; otherwise allocate numeric id (alarm_1, alarm_2, ...)
+            supplied_name = call.data.get("name")
+            if supplied_name:
+                # sanitize to entity-safe id
+                item_name = supplied_name.replace(" ", "_")
+                display_name = supplied_name
+                # if this id already exists, fall back to numeric ID allocation
+                if item_name in self._active_items:
+                    item_name = self._get_next_available_id("alarm" if is_alarm else "reminder")
+                    display_name = item_name
+            else:
+                item_name = self._get_next_available_id("alarm" if is_alarm else "reminder")
+                display_name = item_name
+
             repeat = call.data.get("repeat", "once")
             repeat_days = call.data.get("repeat_days", [])
-            item_name = display_name.replace(" ", "_")
+            item_id = item_name
 
-            # compute scheduled_time
+            # compute time object from input
             if isinstance(time_input, str):
                 # Accept "HH:MM", "HH:MM:SS", or ISO datetime "YYYY-MM-DDTHH:MM:SS"
-                # Use Home Assistant dt_util.parse_time on the time portion
                 time_str = time_input.split("T")[-1]
                 parsed = dt_util.parse_time(time_str)
                 if parsed is None:
@@ -183,23 +209,23 @@ class AlarmAndReminderCoordinator:
             elif isinstance(time_input, datetime):
                 time_obj = time_input.time()
             else:
-                # assume it's already a time object
-                time_obj = time_input
+                # assume it's already a time object (or None -> use now)
+                time_obj = time_input or now.time()
 
+            # combine date/time and make timezone-aware
             if date_input:
                 scheduled_time = datetime.combine(date_input, time_obj)
             else:
                 scheduled_time = datetime.combine(now.date(), time_obj)
-                # Make scheduled_time timezone-aware in Home Assistant's local timezone
-                # dt_util.as_local will return an aware datetime; do this before any comparisons to now
-                scheduled_time = dt_util.as_local(scheduled_time)
 
-                # If the computed time is already in the past, push to next day
-                if scheduled_time <= now:
-                    scheduled_time = scheduled_time + timedelta(days=1)
- 
+            # Make scheduled_time timezone-aware in Home Assistant's local timezone
+            scheduled_time = dt_util.as_local(scheduled_time)
+
+            # If the computed time is already in the past, push to next day
+            if scheduled_time <= now:
+                scheduled_time = scheduled_time + timedelta(days=1)
+
             # Build item dict
-            item_id = item_name
             item = {
                 "scheduled_time": scheduled_time,
                 "satellite": target.get("satellite"),
@@ -213,7 +239,7 @@ class AlarmAndReminderCoordinator:
                 "entity_id": item_id,
                 "unique_id": item_id,
                 "enabled": True,
-                "sound_file": call.data.get("sound_file")
+                "sound_file": call.data.get("sound_file"),
             }
 
             # Save and put into memory
@@ -230,13 +256,10 @@ class AlarmAndReminderCoordinator:
             self.hass.bus.async_fire(f"{DOMAIN}_state_changed", {"entity_id": f"{DOMAIN}.{item_id}"})
 
             # Schedule the trigger with async_track_point_in_time (avoids late-binding)
-            def _call_trigger(iid=item_id):
-                self.hass.async_create_task(self._trigger_item(iid))
-
             async_track_point_in_time(
                 self.hass,
                 lambda now_dt, iid=item_id: self.hass.async_create_task(self._trigger_item(iid)),
-                scheduled_time
+                scheduled_time,
             )
 
             _LOGGER.info("Scheduled %s %s for %s", "alarm" if is_alarm else "reminder", item_id, scheduled_time)

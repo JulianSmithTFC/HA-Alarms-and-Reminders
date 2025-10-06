@@ -176,16 +176,59 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             _LOGGER.debug("Validated target: satellite=%s, media_players=%s", satellite, media_players)
             return {"satellite": satellite, "media_players": media_players}
 
-        async def async_schedule_alarm(call: ServiceCall):
+        # helper to extract target entity ids from a ServiceCall
+        def _extract_target_entity_id(call: ServiceCall) -> str | None:
+            """Return a single entity_id from ServiceCall data or None."""
+            # direct entity_id in data
+            eid = call.data.get("entity_id") or call.data.get("alarm_id") or call.data.get("reminder_id")
+            if eid:
+                # entity_id may be list or string
+                if isinstance(eid, list):
+                    return eid[0] if eid else None
+                return str(eid)
+
+            # Home Assistant scripts/routines can pass a "target" dict
+            target = call.data.get("target") or {}
+            if isinstance(target, dict):
+                te = target.get("entity_id") or target.get("entity_ids")
+                if te:
+                    if isinstance(te, list):
+                        return te[0] if te else None
+                    return str(te)
+
+            return None
+
+        async def _handle_set_alarm(call: ServiceCall) -> None:
             """Handle the alarm service call."""
             target = validate_target(call)
-            await coordinator.schedule_item(call, is_alarm=True, target=target)
+            await coordinator.schedule_item(call, True, {
+                "satellite": target.get("satellite"),
+                "media_players": target.get("media_players", [])
+            })
 
-        async def async_schedule_reminder(call: ServiceCall):
-            """Handle the reminder service call."""
+        async def _handle_set_reminder(call: ServiceCall) -> None:
             target = validate_target(call)
-            await coordinator.schedule_item(call, is_alarm=False, target=target)
+            await coordinator.schedule_item(call, False, {
+                "satellite": target.get("satellite"),
+                "media_players": target.get("media_players", [])
+            })
 
+        async def _handle_stop(call: ServiceCall) -> None:
+            target_eid = _extract_target_entity_id(call)
+            if target_eid:
+                await coordinator.stop_item(target_eid, is_alarm=True if call.service == SERVICE_STOP_ALARM else False)
+
+        async def _handle_snooze(call: ServiceCall) -> None:
+            minutes = call.data.get("minutes", DEFAULT_SNOOZE_MINUTES)
+            target_eid = _extract_target_entity_id(call)
+            if target_eid:
+                await coordinator.snooze_item(target_eid, minutes, is_alarm=True if call.service == SERVICE_SNOOZE_ALARM else False)
+
+        async def _handle_delete(call: ServiceCall) -> None:
+            target_eid = _extract_target_entity_id(call)
+            if target_eid:
+                await coordinator.delete_item(target_eid, is_alarm=True if call.service == SERVICE_DELETE_ALARM else False)
+# ...existing code...
         # Register services with updated schema
         hass.services.async_register(
             DOMAIN,
@@ -761,46 +804,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # --- Service handlers (ensure services.yaml remains for UI metadata) ---
         async def _handle_set_alarm(call: ServiceCall) -> None:
+            """Handle the alarm service call."""
+            target = validate_target(call)
             await coordinator.schedule_item(call, True, {
-                "satellite": call.data.get("satellite"),
-                "media_players": ([call.data.get("media_player")] if call.data.get("media_player") else [])
+                "satellite": target.get("satellite"),
+                "media_players": target.get("media_players", [])
             })
 
         async def _handle_set_reminder(call: ServiceCall) -> None:
+            target = validate_target(call)
             await coordinator.schedule_item(call, False, {
-                "satellite": call.data.get("satellite"),
-                "media_players": ([call.data.get("media_player")] if call.data.get("media_player") else [])
+                "satellite": target.get("satellite"),
+                "media_players": target.get("media_players", [])
             })
 
         async def _handle_stop(call: ServiceCall) -> None:
-            # target can be an entity_id or alarm_id field; adapt to your coordinator API
-            target = (call.data.get("alarm_id") or call.data.get("reminder_id") or
-                      (call.target and call.target.get("entity_id")))
-            if target:
-                await coordinator.stop_item(target if isinstance(target, str) else target[0])
+            target_id = _extract_target_entity_id(call)
+            if target_id:
+                await coordinator.stop_item(target_eid, is_alarm=True if call.service == SERVICE_STOP_ALARM else False)
 
         async def _handle_snooze(call: ServiceCall) -> None:
-            minutes = call.data.get("minutes", 5)
-            target = (call.data.get("alarm_id") or call.data.get("reminder_id") or
-                      (call.target and call.target.get("entity_id")))
-            if target:
-                await coordinator.snooze_item(target if isinstance(target, str) else target[0], minutes)
+            minutes = call.data.get("minutes", DEFAULT_SNOOZE_MINUTES)
+            target_id = _extract_target_entity_id(call)
+            if target_id:
+                await coordinator.snooze_item(target_id, minutes, is_alarm=True if call.service == SERVICE_SNOOZE_ALARM else False)
 
         async def _handle_delete(call: ServiceCall) -> None:
-            target = (call.data.get("alarm_id") or call.data.get("reminder_id") or
-                      (call.target and call.target.get("entity_id")))
-            if target:
-                await coordinator.delete_item(target if isinstance(target, str) else target[0])
-
-        # Register services under your domain (these names match services.yaml)
-        hass.services.async_register(DOMAIN, "set_alarm", _handle_set_alarm)
-        hass.services.async_register(DOMAIN, "set_reminder", _handle_set_reminder)
-        hass.services.async_register(DOMAIN, "stop", _handle_stop)
-        hass.services.async_register(DOMAIN, "snooze", _handle_snooze)
-        hass.services.async_register(DOMAIN, "delete", _handle_delete)
-        # ...register other services (reschedule, edit, stop_all, etc.) similarly...
-        # -----------------------------------------------------------------------
-
+            target_id = _extract_target_entity_id(call)
+            if target_id:
+                await coordinator.delete_item(target_id, is_alarm=True if call.service == SERVICE_DELETE_ALARM else False)
+# ...existing code...
         # Forward platforms and finish setup
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         return True

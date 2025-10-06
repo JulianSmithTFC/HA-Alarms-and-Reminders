@@ -26,6 +26,7 @@ class MediaHandler:
                 {
                     "entity_id": media_player,
                     "message": message,
+                    # TODO: use default assistant language instead of hardcoding it
                     "language": "en"
                 },
                 blocking=True

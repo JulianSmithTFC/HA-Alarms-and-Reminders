@@ -98,7 +98,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Alarms and Reminders integration (minimal)."""
     # Only initialize the top-level data container here.
     hass.data.setdefault(DOMAIN, {})
-    return True
+    # return True
 
     try:
         # Initialize data structure

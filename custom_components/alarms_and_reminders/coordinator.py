@@ -137,12 +137,12 @@ class AlarmAndReminderCoordinator:
                 if "scheduled_time" in state_data and isinstance(state_data["scheduled_time"], datetime):
                     state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
 
-                self.hass.states.async_set(f"{DOMAIN}.{item_id}", status, state_data)
-
-                # Recreate stop events and resume if active
+                # We no longer create an entity per item. Instead update a central dashboard entity.
+                # Mark overall state 'active' if any active items exist, otherwise 'idle'
+                # and include full items lists as attributes.
+                # schedule playback/resume as before per item
                 if status == "active":
                     self._stop_events[item_id] = asyncio.Event()
-                    # resume playback in background
                     self.hass.async_create_task(self._start_playback(item_id), name=f"playback_{item_id}")
 
                 # Schedule future triggers for scheduled items
@@ -152,18 +152,15 @@ class AlarmAndReminderCoordinator:
                         sched = dt_util.parse_datetime(sched)
                         item["scheduled_time"] = sched
 
-                    # schedule using async_track_point_in_time to avoid call-later late-binding issues
                     if isinstance(sched, datetime):
                         if sched <= now:
-                            # If time already passed, trigger immediately (or implement repeat logic)
                             self.hass.async_create_task(self._trigger_item(item_id))
                         else:
-                            # capture item_id via closure default
-                            def _cb(iid=item_id):
-                                self.hass.async_create_task(self._trigger_item(iid))
+                            # schedule using async_track_point_in_time
                             async_track_point_in_time(self.hass, lambda now_dt, iid=item_id: self.hass.async_create_task(self._trigger_item(iid)), sched)
 
-            # Fire bus update so other platforms (switch) can build entities
+            # update central dashboard entity
+            self._update_dashboard_state()
             self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
 
         except Exception as err:
@@ -181,17 +178,27 @@ class AlarmAndReminderCoordinator:
 
             # If user supplied a name use it; otherwise allocate numeric id (alarm_1, alarm_2, ...)
             supplied_name = call.data.get("name")
-            if supplied_name:
-                # sanitize to entity-safe id
-                item_name = supplied_name.replace(" ", "_")
-                display_name = supplied_name
-                # if this id already exists, fall back to numeric ID allocation
-                if item_name in self._active_items:
-                    item_name = self._get_next_available_id("alarm" if is_alarm else "reminder")
+            if is_alarm:
+                if supplied_name:
+                    # sanitize to entity-safe id
+                    item_name = supplied_name.replace(" ", "_")
+                    display_name = supplied_name
+                    # if this id already exists, fall back to numeric ID allocation
+                    if item_name in self._active_items:
+                        item_name = self._get_next_available_id("alarm")
+                        display_name = item_name
+                else:
+                    item_name = self._get_next_available_id("alarm")
                     display_name = item_name
             else:
-                item_name = self._get_next_available_id("alarm" if is_alarm else "reminder")
-                display_name = item_name
+                # Reminders MUST have names as requested
+                if not supplied_name:
+                    raise ValueError("Reminders require a name")
+                item_name = supplied_name.replace(" ", "_")
+                display_name = supplied_name
+                if item_name in self._active_items:
+                    # Do not allow duplicate reminder names
+                    raise ValueError(f"Reminder name already exists: {supplied_name}")
 
             repeat = call.data.get("repeat", "once")
             repeat_days = call.data.get("repeat_days", [])
@@ -240,20 +247,16 @@ class AlarmAndReminderCoordinator:
                 "unique_id": item_id,
                 "enabled": True,
                 "sound_file": call.data.get("sound_file"),
+                "notify_device": call.data.get("notify_device"),
             }
 
             # Save and put into memory
             self._active_items[item_id] = item
             await self.storage.async_save(self._active_items)
 
-            # Create HA state for the item (serialize datetime)
-            state_data = dict(item)
-            if isinstance(state_data.get("scheduled_time"), datetime):
-                state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
-            self.hass.states.async_set(f"{DOMAIN}.{item_id}", "scheduled", state_data)
-
-            # Fire event so switch platform can add/update entities
-            self.hass.bus.async_fire(f"{DOMAIN}_state_changed", {"entity_id": f"{DOMAIN}.{item_id}"})
+            # Update central dashboard entity (single switch-like view)
+            self._update_dashboard_state()
+            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
 
             # Schedule the trigger with async_track_point_in_time (avoids late-binding)
             async_track_point_in_time(
@@ -281,11 +284,8 @@ class AlarmAndReminderCoordinator:
             self._active_items[item_id] = item
             await self.storage.async_save(self._active_items)
 
-            # Update entity state (serialize datetime)
-            state_data = dict(item)
-            if "scheduled_time" in state_data and isinstance(state_data["scheduled_time"], datetime):
-                state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
-            self.hass.states.async_set(f"{DOMAIN}.{item_id}", "active", state_data)
+            # Update central dashboard entity
+            self._update_dashboard_state()
             self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
 
             # Create stop event and start playback in background task
@@ -306,7 +306,7 @@ class AlarmAndReminderCoordinator:
             item["status"] = "error"
             self._active_items[item_id] = item
             await self.storage.async_save(self._active_items)
-            self.hass.states.async_set(f"{DOMAIN}.{item_id}", "error", item)
+            self._update_dashboard_state()
             self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
 
     async def _start_playback(self, item_id: str) -> None:
@@ -461,11 +461,8 @@ class AlarmAndReminderCoordinator:
             self._active_items[item_id] = item
             await self.storage.async_save(self._active_items)
 
-            # Update entity state
-            state_data = dict(item)
-            if "scheduled_time" in state_data and isinstance(state_data["scheduled_time"], datetime):
-                state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
-            self.hass.states.async_set(f"{DOMAIN}.{item_id}", "stopped", state_data)
+            # Update central dashboard entity
+            self._update_dashboard_state()
             self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
             _LOGGER.info("Successfully stopped %s: %s", "alarm" if is_alarm else "reminder", item_id)
 
@@ -524,14 +521,8 @@ class AlarmAndReminderCoordinator:
             self._active_items[item_id] = item
             await self.storage.async_save(self._active_items)
             
-            # Step 5: Update entity state
-            state_data = dict(item)
-            state_data["scheduled_time"] = item["scheduled_time"].isoformat()
-            self.hass.states.async_set(
-                f"{DOMAIN}.{item_id}",
-                "scheduled",
-                state_data
-            )
+            # Step 5: Update central dashboard
+            self._update_dashboard_state()
 
             # Step 6: Schedule new trigger
             delay = (new_time - now).total_seconds()
@@ -543,6 +534,7 @@ class AlarmAndReminderCoordinator:
                 )
             )
 
+            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
             _LOGGER.info(
                 "Successfully snoozed %s %s for %d minutes. Will ring at %s",
                 "alarm" if is_alarm else "reminder",
@@ -930,3 +922,43 @@ class AlarmAndReminderCoordinator:
                     self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
             except Exception:
                 _LOGGER.exception("Failed to persist error state")
+
+    def _update_dashboard_state(self) -> None:
+        """Update a single dashboard entity with full lists of alarms and reminders.
+
+        This creates/updates entity alarms_and_reminders.items with attributes:
+         - alarms: mapping id -> attributes
+         - reminders: mapping id -> attributes
+         - counts and overall state ('active' if any active items else 'idle')
+        """
+        try:
+            alarms = {}
+            reminders = {}
+            overall_state = "idle"
+            for iid, item in self._active_items.items():
+                summary = {
+                    "name": item.get("name"),
+                    "status": item.get("status"),
+                    "scheduled_time": item.get("scheduled_time").isoformat() if isinstance(item.get("scheduled_time"), datetime) else item.get("scheduled_time"),
+                    "message": item.get("message"),
+                    "is_alarm": bool(item.get("is_alarm")),
+                    "sound_file": item.get("sound_file"),
+                }
+                if item.get("status") == "active":
+                    overall_state = "active"
+                if item.get("is_alarm"):
+                    alarms[iid] = summary
+                else:
+                    reminders[iid] = summary
+
+            attrs = {
+                "alarms": alarms,
+                "reminders": reminders,
+                "alarm_count": len(alarms),
+                "reminder_count": len(reminders),
+                "last_updated": dt_util.now().isoformat(),
+            }
+            # single switch-like entity
+            self.hass.states.async_set(f"{DOMAIN}.items", overall_state, attrs)
+        except Exception as err:
+            _LOGGER.error("Failed to update dashboard state: %s", err, exc_info=True)

@@ -18,13 +18,9 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up switches for each saved alarm/reminder for this config entry."""
-    # Per-entry storage: coordinator is stored under hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    if not entry_data:
-        _LOGGER.error("No data found for entry %s", entry.entry_id)
-        return
-
-    coordinator: AlarmAndReminderCoordinator = entry_data.get("coordinator")
+    # Coordinator may be stored at root hass.data[DOMAIN]["coordinator"] or per-entry
+    root = hass.data.get(DOMAIN, {})
+    coordinator = root.get("coordinator") or root.get(entry.entry_id, {}).get("coordinator")
     if not coordinator:
         _LOGGER.error("Coordinator not found for entry %s", entry.entry_id)
         return
@@ -90,6 +86,31 @@ class AlarmItemSwitch(SwitchEntity):
         return item.get("enabled", item.get("status", "scheduled") != "disabled")
 
     @property
+    def extra_state_attributes(self) -> dict:
+        """Expose item attributes in the switch entity for dashboard view."""
+        item = self.coordinator._active_items.get(self.item_id, {}) or {}
+        # Normalize scheduled_time to iso string if it's a datetime
+        sched = item.get("scheduled_time")
+        try:
+            if hasattr(sched, "isoformat"):
+                sched = sched.isoformat()
+        except Exception:
+            pass
+
+        return {
+            "name": item.get("name"),
+            "message": item.get("message"),
+            "scheduled_time": sched,
+            "status": item.get("status"),
+            "is_alarm": bool(item.get("is_alarm")),
+            "repeat": item.get("repeat"),
+            "repeat_days": item.get("repeat_days"),
+            "sound_file": item.get("sound_file"),
+            "notify_device": item.get("notify_device"),
+            "enabled": item.get("enabled", True),
+        }
+
+    @property
     def device_info(self):
         """Return device info so all switches are grouped under one integration device."""
         # Use the coordinator id (set to the config entry id) for grouping under the device created in __init__.py
@@ -114,6 +135,7 @@ class AlarmItemSwitch(SwitchEntity):
         await self.coordinator.storage.async_save(self.coordinator._active_items)
         # ask coordinator to reschedule/resume
         await self.coordinator.reschedule_item(self.item_id, {}, item.get("is_alarm", False))
+        # Update HA entity attributes/state
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
@@ -135,11 +157,7 @@ class AlarmItemSwitch(SwitchEntity):
             except Exception:
                 continue
 
-        # Update entity state in HA
-        state_data = dict(item)
-        if "scheduled_time" in state_data and isinstance(state_data["scheduled_time"], datetime):
-            state_data["scheduled_time"] = state_data["scheduled_time"].isoformat()
-        self.hass.states.async_set(f"{DOMAIN}.{self.item_id}", "disabled", state_data)
+        # Update HA entity attributes/state
         self.async_write_ha_state()
 
     async def async_added_to_hass(self):
@@ -148,6 +166,7 @@ class AlarmItemSwitch(SwitchEntity):
         def _handle_update(event=None):
             # refresh name and state
             self._name = self.coordinator._active_items.get(self.item_id, {}).get("name", self._name)
+            # write state so extra_state_attributes are refreshed on the UI
             self.async_write_ha_state()
 
         # keep reference so we can remove later if needed

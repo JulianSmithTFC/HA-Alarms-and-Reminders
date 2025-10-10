@@ -316,7 +316,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             SERVICE_STOP_ALARM,
             async_stop_alarm,
             schema=vol.Schema({
-                vol.Required(ATTR_ALARM_ID): cv.entity_id,  # Changed from cv.string to cv.entity_id
+                vol.Required(ATTR_ALARM_ID): cv.entity_id,  
             }),
         )
 
@@ -740,10 +740,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator = AlarmAndReminderCoordinator(hass, media_handler, announcer)
 
         # Attach stable id and create device so switches group under one device
-        coordinator.id = entry.entry_id
+        # Use a fixed shared device identifier so all entries use the same device
+        coordinator.id = "alarms_and_reminders"  # stable identifier shared across entries
         device_registry = dr.async_get(hass)
         device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
+            config_entry_id=None,  # not tied to a single config entry
             identifiers={(DOMAIN, coordinator.id)},
             name="Alarms and Reminders",
             model="Alarms and Reminders",

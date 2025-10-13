@@ -744,13 +744,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.id = "alarms_and_reminders"  # stable identifier shared across entries
         device_registry = dr.async_get(hass)
         device_registry.async_get_or_create(
-            config_entry_id=None,  # not tied to a single config entry
+            config_entry_id=entry.entry_id,  # 👉 Verknüpfe Gerät mit der tatsächlichen ConfigEntry
             identifiers={(DOMAIN, coordinator.id)},
             name="Alarms and Reminders",
             model="Alarms and Reminders",
             sw_version="0.0.0",
             manufacturer="@omaramin-2000",
         )
+
 
         # Store coordinator and entities list for this entry
         entry_store["coordinator"] = coordinator

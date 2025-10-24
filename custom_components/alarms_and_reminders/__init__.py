@@ -46,12 +46,15 @@ from .const import (
     DEFAULT_SATELLITE,
     DEFAULT_SNOOZE_MINUTES,
     CONF_MEDIA_PLAYER,
+    CONF_ENABLE_LLM,
+    DEFAULT_ENABLE_LLM,    
 )  
 
 from .coordinator import AlarmAndReminderCoordinator
 from .media_player import MediaHandler
 from .announcer import Announcer
 from .intents import async_setup_intents
+from .llm_functions import async_setup_llm_api, async_cleanup_llm_api
 # from .sensor import async_setup_entry as async_setup_sensor_entry
 # sensor platform removed; scheduling moved to coordinator and switches
 
@@ -744,13 +747,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.id = "alarms_and_reminders"  # stable identifier shared across entries
         device_registry = dr.async_get(hass)
         device_registry.async_get_or_create(
-            config_entry_id=None,  # not tied to a single config entry
+            config_entry_id=entry.entry_id,  # Link device to the actual ConfigEntry
             identifiers={(DOMAIN, coordinator.id)},
             name="Alarms and Reminders",
             model="Alarms and Reminders",
             sw_version="0.0.0",
             manufacturer="@omaramin-2000",
         )
+
 
         # Store coordinator and entities list for this entry
         entry_store["coordinator"] = coordinator
@@ -801,7 +805,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_register(DOMAIN, "delete", _handle_delete)
         # ...register other services (reschedule, edit, stop_all, etc.) similarly...
         # -----------------------------------------------------------------------
-
+        # Set up LLM API for voice assistant integration if enabled
+        enable_llm = entry.options.get(CONF_ENABLE_LLM, DEFAULT_ENABLE_LLM)
+        if enable_llm:
+            try:
+                await async_setup_llm_api(hass)
+                _LOGGER.info("LLM API setup completed for alarms and reminders")
+            except Exception as llm_err:
+                _LOGGER.warning("Failed to setup LLM API (non-critical): %s", llm_err)
+        else:
+            _LOGGER.info("LLM API disabled in configuration")
         # Forward platforms and finish setup
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         return True
@@ -813,6 +826,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        # Clean up LLM API
+        try:
+            await async_cleanup_llm_api(hass)
+            _LOGGER.info("LLM API cleanup completed")
+        except Exception as llm_err:
+            _LOGGER.debug("Error cleaning up LLM API: %s", llm_err)        
         hass.data[DOMAIN].pop(entry.entry_id)
     return unload_ok
 

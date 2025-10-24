@@ -3,6 +3,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -16,40 +17,83 @@ class MediaHandler:
         self.reminder_sound = reminder_sound
         self._active_alarms = {}  # Store active alarms/reminders
 
-    async def play_on_media_player(self, media_player: str, message: str, is_alarm: bool) -> None:
-        """Play TTS and sound on media player."""
+    async def play_on_media_player(self, media_player: str, message: str, is_alarm: bool,
+                                    stop_event: asyncio.Event = None, name: str = None) -> None:
+        """Play TTS and sound on media player in a loop with periodic announcements."""
         try:
-            # Play TTS announcement first
-            await self.hass.services.async_call(
-                "tts",
-                "speak",
-                {
-                    "entity_id": media_player,
-                    "message": message,
-                    # TODO: use default assistant language instead of hardcoding it
-                    "language": "en"
-                },
-                blocking=True
-            )
+            # Loop until stopped
+            while True:
+                if stop_event and stop_event.is_set():
+                    _LOGGER.debug("Media player playback stopped")
+                    break
 
-            # Wait for TTS to finish
-            await asyncio.sleep(1)
+                # Format announcement with current time
+                now = dt_util.now()
+                current_time = now.strftime("%I:%M %p").lstrip("0")
 
-            # Play sound file
-            sound_file = self.alarm_sound if is_alarm else self.reminder_sound
-            await self.hass.services.async_call(
-                "media_player",
-                "play_media",
-                {
-                    "entity_id": media_player,
-                    "media_content_id": sound_file,
-                    "media_content_type": "music"
-                },
-                blocking=True
-            )
+                if is_alarm:
+                    if name and not name.startswith("alarm_"):
+                        announcement = f"{name} alarm. It's {current_time}"
+                        if message:
+                            announcement += f". {message}"
+                    else:
+                        announcement = f"It's {current_time}"
+                        if message:
+                            announcement += f". {message}"
+                else:
+                    announcement = f"Time to {name}. It's {current_time}"
+                    if message:
+                        announcement += f". {message}"
+
+                # Play TTS announcement
+                try:
+                    await self.hass.services.async_call(
+                        "tts",
+                        "speak",
+                        {
+                            "entity_id": media_player,
+                            "message": announcement,
+                            "language": "en"
+                        },
+                        blocking=True
+                    )
+
+                    # Wait for TTS to finish
+                    await asyncio.sleep(2)
+                except Exception as tts_err:
+                    _LOGGER.warning("Error playing TTS on media player: %s", tts_err)
+
+                # Check stop event before playing sound
+                if stop_event and stop_event.is_set():
+                    break
+
+                # Play sound file
+                try:
+                    await self.hass.services.async_call(
+                        "media_player",
+                        "play_media",
+                        {
+                            "entity_id": media_player,
+                            "media_content_id": sound_file,
+                            "media_content_type": "music"
+                        },
+                        blocking=False
+                    )
+                except Exception as media_err:
+                    _LOGGER.warning("Error playing sound on media player: %s", media_err)
+
+                # Wait for 60 seconds or until stopped
+                try:
+                    if stop_event:
+                        await asyncio.wait_for(stop_event.wait(), timeout=60)
+                        break
+                    else:
+                        await asyncio.sleep(60)
+                except asyncio.TimeoutError:
+                    continue
 
         except Exception as err:
-            _LOGGER.error("Error playing on media player %s: %s", media_player, err)
+            _LOGGER.error("Error in media player playback loop %s: %s", media_player, err, exc_info=True)
 
     async def play_sound(self, satellite: str, media_players: list, is_alarm: bool, message: str) -> None:
         """Play the appropriate sound file."""

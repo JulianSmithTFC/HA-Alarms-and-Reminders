@@ -1,4 +1,5 @@
 """Intent handling for Alarms and Reminders."""
+import logging
 from datetime import datetime
 from typing import List
 import voluptuous as vol
@@ -17,6 +18,8 @@ from .const import (
     SERVICE_SNOOZE_REMINDER,
     DEFAULT_SNOOZE_MINUTES,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 async def async_setup_intents(hass: HomeAssistant) -> None:
     """Set up the Alarms and Reminders intents."""

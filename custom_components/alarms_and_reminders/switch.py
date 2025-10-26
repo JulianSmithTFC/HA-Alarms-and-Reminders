@@ -9,9 +9,10 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import DOMAIN, DEFAULT_NAME
-from .coordinator import AlarmAndReminderCoordinator
+from .coordinator import AlarmAndReminderCoordinator, ITEM_CREATED, ITEM_UPDATED, ITEM_DELETED
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +30,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     # Build initial switches from currently loaded items
     for item_id in coordinator._active_items.keys():
-        entities.append(AlarmItemSwitch(coordinator, item_id))
+        ent = AlarmItemSwitch(coordinator, item_id)
+        # assign stable entity id to match expectations (DOMAIN.<item_id>)
+        ent.entity_id = f"{DOMAIN}.{item_id}"
+        entities.append(ent)
 
     async_add_entities(entities, True)
 
@@ -37,25 +41,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     entity_map: Dict[str, AlarmItemSwitch] = {e.item_id: e for e in entities}
 
     @callback
-    def _on_state_change(event):
-        """Handle coordinator state change events: add/update/remove switches."""
-        eid = event.data.get("entity_id")
-        if not eid or not eid.startswith(f"{DOMAIN}."):
+    def _on_item_created(item_id: str, item: dict = None):
+        """Add entity when coordinator reports a new item."""
+        if not item_id:
             return
-        item_id = eid.split(".")[-1]
-
-        # If item exists but switch not created, add it
-        if item_id in coordinator._active_items and item_id not in entity_map:
-            ent = AlarmItemSwitch(coordinator, item_id)
-            entity_map[item_id] = ent
-            hass.async_create_task(async_add_entities([ent], True))
-            return
-
-        # If entity exists, ask it to refresh its state
         if item_id in entity_map:
-            entity_map[item_id].async_schedule_update_ha_state(False)
+            return
+        if item_id not in coordinator._active_items:
+            # nothing to add yet
+            return
+        ent = AlarmItemSwitch(coordinator, item_id)
+        ent.entity_id = f"{DOMAIN}.{item_id}"
+        entity_map[item_id] = ent
+        hass.async_create_task(async_add_entities([ent], True))
 
-    hass.bus.async_listen(f"{DOMAIN}_state_changed", _on_state_change)
+    @callback
+    def _on_item_deleted(item_id: str):
+        """Remove entity when coordinator reports deletion."""
+        if not item_id:
+            return
+        ent = entity_map.pop(item_id, None)
+        if ent:
+            # schedule async removal
+            hass.async_create_task(ent.async_remove())
+
+    @callback
+    def _on_item_updated(item_id: str, item: dict = None):
+        """Refresh entity state/attributes on updates."""
+        if not item_id:
+            return
+        ent = entity_map.get(item_id)
+        if ent:
+            ent.async_schedule_update_ha_state(False)
+
+    # Connect dispatcher signals from coordinator
+    async_dispatcher_connect(hass, ITEM_CREATED, _on_item_created)
+    async_dispatcher_connect(hass, ITEM_DELETED, _on_item_deleted)
+    async_dispatcher_connect(hass, ITEM_UPDATED, _on_item_updated)
 
 
 class AlarmItemSwitch(SwitchEntity):
@@ -67,6 +89,7 @@ class AlarmItemSwitch(SwitchEntity):
         self._available = True
         # default name; will be kept in sync on update
         self._name = coordinator._active_items.get(item_id, {}).get("name", item_id)
+        self._remove_dispatcher = None
 
     @property
     def unique_id(self) -> str:
@@ -163,17 +186,19 @@ class AlarmItemSwitch(SwitchEntity):
     async def async_added_to_hass(self):
         """Register listener so entity updates when coordinator publishes changes."""
         @callback
-        def _handle_update(event=None):
+        def _handle_update(event_item_id: str, item: dict = None):
             # refresh name and state
+            if event_item_id != self.item_id:
+                return
             self._name = self.coordinator._active_items.get(self.item_id, {}).get("name", self._name)
             # write state so extra_state_attributes are refreshed on the UI
             self.async_write_ha_state()
 
         # keep reference so we can remove later if needed
-        self._remove_listener = self.hass.bus.async_listen(f"{DOMAIN}_state_changed", _handle_update)
+        self._remove_dispatcher = async_dispatcher_connect(self.hass, ITEM_UPDATED, _handle_update)
 
     async def async_will_remove_from_hass(self):
         """Cleanup listeners."""
-        if getattr(self, "_remove_listener", None):
-            self._remove_listener()
-            self._remove_listener = None
+        if getattr(self, "_remove_dispatcher", None):
+            self._remove_dispatcher()
+            self._remove_dispatcher = None

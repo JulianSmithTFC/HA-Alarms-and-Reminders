@@ -8,7 +8,7 @@ import asyncio
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
-from datetime import datetime, timedelta
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import DOMAIN, DEFAULT_SNOOZE_MINUTES, DEFAULT_NAME
 
@@ -17,6 +17,13 @@ from .storage import AlarmReminderStorage
 _LOGGER = logging.getLogger(__name__)
 
 __all__ = ["AlarmAndReminderCoordinator"]
+
+# Dispatcher event names (used by switch platform to add/remove/update entities)
+ITEM_CREATED = f"{DOMAIN}_item_created"
+ITEM_UPDATED = f"{DOMAIN}_item_updated"
+ITEM_DELETED = f"{DOMAIN}_item_deleted"
+DASHBOARD_UPDATED = f"{DOMAIN}_dashboard_updated"
+
 
 class AlarmAndReminderCoordinator:
     """Coordinates scheduling of alarms and reminders."""
@@ -161,7 +168,8 @@ class AlarmAndReminderCoordinator:
 
             # update central dashboard entity
             self._update_dashboard_state()
-            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+            # notify listeners that the dashboard has been updated
+            async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
 
         except Exception as err:
             _LOGGER.error("Error loading items in coordinator: %s", err, exc_info=True)
@@ -256,7 +264,10 @@ class AlarmAndReminderCoordinator:
 
             # Update central dashboard entity (single switch-like view)
             self._update_dashboard_state()
-            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+            async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
+
+            # notify switch platform (and any other listeners) a new item was created
+            async_dispatcher_send(self.hass, ITEM_CREATED, item_id, item)
 
             # Schedule the trigger with async_track_point_in_time (avoids late-binding)
             async_track_point_in_time(
@@ -286,7 +297,10 @@ class AlarmAndReminderCoordinator:
 
             # Update central dashboard entity
             self._update_dashboard_state()
-            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+            async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
+
+            # notify listeners item updated (became active)
+            async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, item)
 
             # Create stop event and start playback in background task
             stop_event = asyncio.Event()
@@ -307,7 +321,7 @@ class AlarmAndReminderCoordinator:
             self._active_items[item_id] = item
             await self.storage.async_save(self._active_items)
             self._update_dashboard_state()
-            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+            async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, item)
 
     async def _start_playback(self, item_id: str) -> None:
         """Start playback loops for an active item (background task)."""
@@ -335,6 +349,9 @@ class AlarmAndReminderCoordinator:
                     self._active_items[item_id]["status"] = "stopped"
                     self._active_items[item_id]["last_stopped"] = dt_util.now().isoformat()
                     await self.storage.async_save(self._active_items)
+                    # keep dashboard in sync
+                    self._update_dashboard_state()
+                    async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, self._active_items[item_id])
                     self.hass.states.async_set(f"{DOMAIN}.{item_id}", "stopped", self._active_items[item_id])
                     self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
 
@@ -348,7 +365,7 @@ class AlarmAndReminderCoordinator:
                 self._active_items[item_id]["status"] = "error"
                 await self.storage.async_save(self._active_items)
                 self.hass.states.async_set(f"{DOMAIN}.{item_id}", "error", self._active_items[item_id])
-                self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+                async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, self._active_items[item_id])
 
     async def _send_notification(self, item_id: str, item: dict) -> None:
         """Send notification with action buttons."""
@@ -463,6 +480,11 @@ class AlarmAndReminderCoordinator:
 
             # Update central dashboard entity
             self._update_dashboard_state()
+            async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
+
+            # notify listeners that item state changed (stopped)
+            async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, item)
+
             self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
             _LOGGER.info("Successfully stopped %s: %s", "alarm" if is_alarm else "reminder", item_id)
 
@@ -523,6 +545,10 @@ class AlarmAndReminderCoordinator:
             
             # Step 5: Update central dashboard
             self._update_dashboard_state()
+            async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
+
+            # notify listeners of update
+            async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, item)
 
             # Step 6: Schedule new trigger
             delay = (new_time - now).total_seconds()
@@ -573,6 +599,8 @@ class AlarmAndReminderCoordinator:
 
             if stopped_count > 0:
                 # Force update of sensors
+                self._update_dashboard_state()
+                async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
                 self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
                 _LOGGER.info(
                     "Successfully stopped %d %s", 
@@ -671,8 +699,12 @@ class AlarmAndReminderCoordinator:
                 item
             )
 
-            # Force update of sensors
-            self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+            # Force update of sensors / dashboard
+            self._update_dashboard_state()
+            async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
+
+            # notify listeners that this item changed
+            async_dispatcher_send(self.hass, ITEM_UPDATED, found_id, item)
 
             _LOGGER.info(
                 "Successfully edited %s: %s", 
@@ -715,10 +747,16 @@ class AlarmAndReminderCoordinator:
             await self.storage.async_delete_item(item_id)
             self._active_items.pop(item_id)
 
-            # Remove entity
+            # Remove entity (if entity exists)
             self.hass.states.async_remove(f"{DOMAIN}.{item_id}")
 
-            # Force update of sensors
+            # notify listeners to remove entity objects too
+            async_dispatcher_send(self.hass, ITEM_DELETED, item_id)
+
+            # Force update of sensors / dashboard
+            self._update_dashboard_state()
+            async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
+
             self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
 
             _LOGGER.info(
@@ -749,11 +787,16 @@ class AlarmAndReminderCoordinator:
 
                     # Remove entity
                     self.hass.states.async_remove(f"{DOMAIN}.{item_id}")
+
+                    # notify removal
+                    async_dispatcher_send(self.hass, ITEM_DELETED, item_id)
                     
                     deleted_count += 1
 
             if deleted_count > 0:
                 # Force update of sensors
+                self._update_dashboard_state()
+                async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
                 self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
                 _LOGGER.info(
                     "Successfully deleted %d %s",
@@ -839,6 +882,11 @@ class AlarmAndReminderCoordinator:
                 state_data
             )
 
+            # notify listeners
+            async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, item)
+            self._update_dashboard_state()
+            async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
+
             # Schedule new trigger with task name
             delay = (item["scheduled_time"] - now).total_seconds()
             self.hass.loop.call_later(
@@ -887,7 +935,7 @@ class AlarmAndReminderCoordinator:
                     self._active_items[item_id] = item
                     await self.storage.async_save(self._active_items)
                     self.hass.states.async_set(f"{DOMAIN}.{item_id}", "error", item)
-                    self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+                    async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, item)
             except Exception:
                 _LOGGER.exception("Failed to persist error state")
 
@@ -919,7 +967,7 @@ class AlarmAndReminderCoordinator:
                     self._active_items[item_id] = item
                     await self.storage.async_save(self._active_items)
                     self.hass.states.async_set(f"{DOMAIN}.{item_id}", "error", item)
-                    self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
+                    async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, item)
             except Exception:
                 _LOGGER.exception("Failed to persist error state")
 
@@ -960,5 +1008,7 @@ class AlarmAndReminderCoordinator:
             }
             # single switch-like entity
             self.hass.states.async_set(f"{DOMAIN}.items", overall_state, attrs)
+            # also notify listeners that dashboard changed
+            async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
         except Exception as err:
             _LOGGER.error("Failed to update dashboard state: %s", err, exc_info=True)

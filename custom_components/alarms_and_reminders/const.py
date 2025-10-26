@@ -38,6 +38,7 @@ ATTR_NOTIFY_TITLE = "Alarm & Reminder"
 CONF_ALARM_SOUND = "alarm_sound"
 CONF_REMINDER_SOUND = "reminder_sound"
 CONF_MEDIA_PLAYER = "media_player"
+CONF_ENABLE_LLM = "enable_llm"
 
 # Defaults
 DEFAULT_NAME = "Alarms and Reminders"  # Config flow
@@ -48,3 +49,4 @@ DEFAULT_REMINDER_SOUND = "/custom_components/alarms_and_reminders/sounds/reminde
 DEFAULT_MEDIA_PLAYER = None
 DEFAULT_SNOOZE_MINUTES = 5 # Default snooze time in minutes
 DEFAULT_NOTIFICATION_TITLE = "Alarm & Reminder"
+DEFAULT_ENABLE_LLM = False

@@ -16,6 +16,7 @@ import asyncio
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.loader import bind_hass
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.event import async_call_later
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,26 +30,15 @@ Listener = Callable[[], Awaitable[None]]
 
 
 class AlarmReminderStorage:
-    """Simple storage for alarms & reminders (id -> item dict).
-
-    Persisted file layout (grouped):
-    {
-      "version": 1,
-      "minor_version": 1,
-      "key": "alarms_and_reminders.storage",
-      "data": {
-        "Alarms": { "<id>": {...}, ... },
-        "Reminders": { "<id>": {...}, ... }
-      }
-    }
-    """
-
+    """Simple storage for alarms & reminders (id -> item dict)."""
+    
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         # flattened in-memory mapping id -> item
         self._items: MutableMapping[str, Dict[str, Any]] = {}
-        self._save_handle: Optional[asyncio.TimerHandle] = None
+        # holds the cancel function returned by async_call_later
+        self._save_handle: Optional[Callable[[], None]] = None
         self._lock = asyncio.Lock()
         self._listeners: List[Listener] = []
 
@@ -129,7 +119,8 @@ class AlarmReminderStorage:
         """Create and persist a new item (overwrites if exists)."""
         async with self._lock:
             self._items[item_id] = dict(data)
-            await self.async_save(self._items)
+            # schedule a debounced save (don't block callers)
+            self.async_schedule_save()
             return dict(self._items[item_id])
 
     async def async_update(self, item_id: str, changes: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -138,7 +129,8 @@ class AlarmReminderStorage:
             if item_id not in self._items:
                 return None
             self._items[item_id].update(changes)
-            await self.async_save(self._items)
+            # schedule a debounced save
+            self.async_schedule_save()
             return dict(self._items[item_id])
 
     async def async_delete(self, item_id: str) -> bool:
@@ -146,7 +138,8 @@ class AlarmReminderStorage:
         async with self._lock:
             if item_id in self._items:
                 del self._items[item_id]
-                await self.async_save(self._items)
+                # schedule a debounced save
+                self.async_schedule_save()
                 return True
             return False
 
@@ -154,7 +147,8 @@ class AlarmReminderStorage:
         """Remove all items (clears both buckets)."""
         async with self._lock:
             self._items = {}
-            await self.async_save(self._items)
+            # schedule a debounced save
+            self.async_schedule_save()
 
     #
     # Save / schedule save / listener management
@@ -162,16 +156,20 @@ class AlarmReminderStorage:
     @callback
     def async_schedule_save(self) -> None:
         """Schedule a debounced save to disk after SAVE_DELAY seconds."""
-        # cancel previous scheduled save
+        # cancel previous scheduled save (async_call_later returns a cancel function)
         if self._save_handle:
             try:
-                self._save_handle.cancel()
+                self._save_handle()
             except Exception:
                 pass
             self._save_handle = None
 
-        loop = self.hass.loop
-        self._save_handle = loop.call_later(SAVE_DELAY, lambda: self.hass.async_create_task(self.async_save()))
+        def _do_save(now):
+            # create task to perform actual save
+            self.hass.async_create_task(self.async_save())
+
+        # schedule save using HA helper; it returns a cancel function we store
+        self._save_handle = async_call_later(self.hass, SAVE_DELAY, _do_save)
 
     async def async_save(self, items: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
         """Persist flattened items mapping to storage using grouped structure.

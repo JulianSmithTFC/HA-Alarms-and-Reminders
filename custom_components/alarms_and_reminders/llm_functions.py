@@ -4,7 +4,12 @@ import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import llm
+
+# Make llm import optional so tests / older HA installs don't fail at import time.
+try:
+    from homeassistant.helpers import llm  # type: ignore
+except Exception:
+    llm = None  # type: ignore
 
 from .alarm_tools import DeleteAlarmTool, ListAlarmsTool, SetAlarmTool
 from .reminder_tools import DeleteReminderTool, ListRemindersTool, SetReminderTool
@@ -44,74 +49,97 @@ Be helpful and conversational when confirming actions or listing items.
 """.strip()
 
 
-class AlarmReminderAPI(llm.API):
-    """Alarm and Reminder management API for LLM integration."""
+# Only define the real LLM API class if llm helper is available.
+if llm is not None:
 
-    def __init__(self, hass: HomeAssistant, name: str) -> None:
-        """Initialize the API."""
-        super().__init__(hass=hass, id=DOMAIN, name=name)
+    class AlarmReminderAPI(llm.API):
+        """Alarm and Reminder management API for LLM integration."""
 
-    async def async_get_api_instance(
-        self, llm_context: llm.LLMContext
-    ) -> llm.APIInstance:
-        """Get API instance."""
-        tools = [
-            SetAlarmTool(),
-            ListAlarmsTool(),
-            DeleteAlarmTool(),
-            StopAlarmTool(),
-            SnoozeAlarmTool(),
-            SetReminderTool(),
-            ListRemindersTool(),
-            DeleteReminderTool(),
-            StopReminderTool(),
-            SnoozeReminderTool(),
-        ]
+        def __init__(self, hass: HomeAssistant, name: str) -> None:
+            """Initialize the API."""
+            super().__init__(hass=hass, id=DOMAIN, name=name)
 
-        return llm.APIInstance(
-            api=self,
-            api_prompt=ALARM_REMINDER_SERVICES_PROMPT,
-            llm_context=llm_context,
-            tools=tools,
-        )
+        async def async_get_api_instance(
+            self, llm_context: "llm.LLMContext"
+        ) -> "llm.APIInstance":
+            """Get API instance."""
+            tools = [
+                SetAlarmTool(),
+                ListAlarmsTool(),
+                DeleteAlarmTool(),
+                StopAlarmTool(),
+                SnoozeAlarmTool(),
+                SetReminderTool(),
+                ListRemindersTool(),
+                DeleteReminderTool(),
+                StopReminderTool(),
+                SnoozeReminderTool(),
+            ]
 
-
-async def async_setup_llm_api(hass: HomeAssistant) -> None:
-    """Set up LLM API for alarm and reminder services."""
-    # Check if already set up
-    if DOMAIN in hass.data and "llm_api" in hass.data[DOMAIN]:
-        _LOGGER.debug("LLM API already registered")
-        return
-
-    hass.data.setdefault(DOMAIN, {})
-
-    # Create and register the API
-    alarm_reminder_api = AlarmReminderAPI(hass, ALARM_REMINDER_API_NAME)
-    hass.data[DOMAIN]["llm_api"] = alarm_reminder_api
-
-    try:
-        unregister_func = llm.async_register_api(hass, alarm_reminder_api)
-        hass.data[DOMAIN]["llm_api_unregister"] = unregister_func
-        _LOGGER.info("Alarms and Reminders LLM API registered successfully")
-    except Exception as e:
-        _LOGGER.error("Failed to register LLM API: %s", e, exc_info=True)
-        raise
+            return llm.APIInstance(
+                api=self,
+                api_prompt=ALARM_REMINDER_SERVICES_PROMPT,
+                llm_context=llm_context,
+                tools=tools,
+            )
 
 
-async def async_cleanup_llm_api(hass: HomeAssistant) -> None:
-    """Clean up LLM API."""
-    if DOMAIN not in hass.data:
-        return
+    async def async_setup_llm_api(hass: HomeAssistant) -> None:
+        """Set up LLM API for alarm and reminder services."""
+        # Check if already set up
+        if DOMAIN in hass.data and "llm_api" in hass.data[DOMAIN]:
+            _LOGGER.debug("LLM API already registered")
+            return
 
-    # Unregister API if we have the unregister function
-    unreg_func = hass.data[DOMAIN].get("llm_api_unregister")
-    if unreg_func:
+        hass.data.setdefault(DOMAIN, {})
+
+        # Create and register the API
+        alarm_reminder_api = AlarmReminderAPI(hass, ALARM_REMINDER_API_NAME)
+        hass.data[DOMAIN]["llm_api"] = alarm_reminder_api
+
         try:
-            unreg_func()
-            _LOGGER.info("Alarms and Reminders LLM API unregistered")
+            unregister_func = llm.async_register_api(hass, alarm_reminder_api)
+            hass.data[DOMAIN]["llm_api_unregister"] = unregister_func
+            _LOGGER.info("Alarms and Reminders LLM API registered successfully")
         except Exception as e:
-            _LOGGER.debug("Error unregistering LLM API: %s", e)
+            _LOGGER.error("Failed to register LLM API: %s", e, exc_info=True)
+            raise
 
-    # Clean up stored data
-    hass.data[DOMAIN].pop("llm_api", None)
-    hass.data[DOMAIN].pop("llm_api_unregister", None)
+
+    async def async_cleanup_llm_api(hass: HomeAssistant) -> None:
+        """Clean up LLM API."""
+        if DOMAIN not in hass.data:
+            return
+
+        # Unregister API if we have the unregister function
+        unreg_func = hass.data[DOMAIN].get("llm_api_unregister")
+        if unreg_func:
+            try:
+                unreg_func()
+                _LOGGER.info("Alarms and Reminders LLM API unregistered")
+            except Exception as e:
+                _LOGGER.debug("Error unregistering LLM API: %s", e)
+
+        # Clean up stored data
+        hass.data[DOMAIN].pop("llm_api", None)
+        hass.data[DOMAIN].pop("llm_api_unregister", None)
+
+else:
+    # llm helper not available - provide no-op stubs so importing this module is safe.
+    class AlarmReminderAPI:
+        def __init__(self, hass: HomeAssistant, name: str) -> None:
+            self.hass = hass
+            self.id = DOMAIN
+            self.name = name
+
+        async def async_get_api_instance(self, llm_context=None):
+            return None
+
+    async def async_setup_llm_api(hass: HomeAssistant) -> None:
+        """No-op when HA does not provide llm helpers."""
+        _LOGGER.debug("LLM helper not available; skipping LLM API setup")
+        return False
+
+    async def async_cleanup_llm_api(hass: HomeAssistant) -> None:
+        """No-op cleanup when llm helpers are absent."""
+        return

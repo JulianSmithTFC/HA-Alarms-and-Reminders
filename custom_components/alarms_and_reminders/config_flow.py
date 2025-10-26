@@ -1,17 +1,17 @@
 """Coordinator for scheduling alarms and reminders."""
+from __future__ import annotations
+from typing import Any, Dict
 import logging
 import re
-from typing import Dict, Any
 from datetime import datetime, timedelta
 import asyncio
 
+from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
-from datetime import datetime, timedelta
 
 from .const import DOMAIN, DEFAULT_SNOOZE_MINUTES, DEFAULT_NAME
-
 from .storage import AlarmReminderStorage
 
 _LOGGER = logging.getLogger(__name__)
@@ -968,3 +968,14 @@ class AlarmAndReminderCoordinator:
             self.hass.states.async_set(f"{DOMAIN}.items", overall_state, attrs)
         except Exception as err:
             _LOGGER.error("Failed to update dashboard state: %s", err, exc_info=True)
+
+class AlarmsAndRemindersConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Simple config flow for Alarms and Reminders."""
+
+    VERSION = 1
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None):
+        if user_input is None:
+            return self.async_show_form(step_id="user")
+        # create a default entry (no options required)
+        return self.async_create_entry(title="Alarms and Reminders", data={})

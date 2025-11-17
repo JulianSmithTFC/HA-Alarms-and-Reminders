@@ -22,6 +22,32 @@ _LOGGER = logging.getLogger(__name__)
 
 ALARM_REMINDER_API_NAME = "Alarm and Reminder Management"
 
+def get_coordinator(hass: HomeAssistant):
+    """Get the coordinator from hass.data - shared helper function."""
+    for entry_id, data in hass.data.get(DOMAIN, {}).items():
+        if isinstance(data, dict) and "coordinator" in data:
+            return data["coordinator"]
+    return None
+
+ALARM_REMINDER_SERVICES_PROMPT = """
+You have access to alarm and reminder management tools to help users manage their alarms and reminders.
+
+For Alarms:
+- When a user asks to set an alarm, use the set_alarm tool
+- When a user asks what alarms are set or scheduled, use the list_alarms tool
+- When a user asks to delete or cancel an alarm, use the delete_alarm tool
+- When a user asks to stop or dismiss a ringing alarm, use the stop_alarm tool
+- When a user asks to snooze a ringing alarm, use the snooze_alarm tool
+
+For Reminders:
+- When a user asks to set a reminder, use the set_reminder tool
+- When a user asks what reminders are set or scheduled, use the list_reminders tool
+- When a user asks to delete or cancel a reminder, use the delete_reminder tool
+- When a user asks to stop or dismiss a ringing reminder, use the stop_reminder tool
+- When a user asks to snooze a ringing reminder, use the snooze_reminder tool
+
+Be helpful and conversational when confirming actions or listing items.
+""".strip()
 
 # Only define the real LLM API class if llm helper is available.
 if llm is not None:
@@ -203,3 +229,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except Exception:
             _LOGGER.exception("Failed to cleanup LLM API")
     # ...existing code...
+

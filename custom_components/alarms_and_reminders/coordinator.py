@@ -321,7 +321,7 @@ class AlarmAndReminderCoordinator:
             self._active_items[item_id] = item
             await self.storage.async_save(self._active_items)
             self._update_dashboard_state()
-            async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, item)
+            async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, self._active_items[item_id])
 
     async def _start_playback(self, item_id: str) -> None:
         """Start playback loops for an active item (background task)."""
@@ -744,7 +744,7 @@ class AlarmAndReminderCoordinator:
                 self._stop_events.pop(item_id)
 
             # Remove from storage and active items
-            await self.storage.async_delete_item(item_id)
+            await self.storage.async_delete(item_id)
             self._active_items.pop(item_id)
 
             # Remove entity (if entity exists)
@@ -782,7 +782,7 @@ class AlarmAndReminderCoordinator:
                         self._stop_events.pop(item_id)
 
                     # Remove from storage and active items
-                    await self.storage.async_delete_item(item_id)
+                    await self.storage.async_delete(item_id)
                     self._active_items.pop(item_id)
 
                     # Remove entity

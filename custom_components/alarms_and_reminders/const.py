@@ -49,4 +49,4 @@ DEFAULT_REMINDER_SOUND = "/custom_components/alarms_and_reminders/sounds/reminde
 DEFAULT_MEDIA_PLAYER = None
 DEFAULT_SNOOZE_MINUTES = 5 # Default snooze time in minutes
 DEFAULT_NOTIFICATION_TITLE = "Alarm & Reminder"
-DEFAULT_ENABLE_LLM = False
+DEFAULT_ENABLE_LLM = True

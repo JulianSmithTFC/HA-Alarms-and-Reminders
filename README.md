@@ -76,8 +76,6 @@ Basic Controls:
 - `alarms_and_reminders.snooze_alarm` - Snooze a specific alarm
 - `alarms_and_reminders.stop_reminder` - Stop a specific reminder
 - `alarms_and_reminders.snooze_reminder` - Snooze a specific reminder
-- `alarms_and_reminders.reschedule_alarm` - reschedule a specific alarm
-- `alarms_and_reminders.reschedule_reminder` - reschedule a specific reminder
 - `alarms_and_reminders.edit_alarm` - edit a specific alarm
 - `alarms_and_reminders.edit_reminder` - edit a specific reminder
   

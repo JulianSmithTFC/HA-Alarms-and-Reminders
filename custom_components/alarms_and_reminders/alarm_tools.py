@@ -2,6 +2,7 @@
 import logging
 import re
 from datetime import datetime, time, timedelta
+from typing import Dict, Any
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant
@@ -28,6 +29,8 @@ else:
     from homeassistant.util import dt as dt_util
 
     from .const import DOMAIN
+
+    from .llm_functions import get_coordinator
 
     _LOGGER = logging.getLogger(__name__)
 
@@ -116,20 +119,9 @@ else:
                 hour, minute = map(int, time_str.split(':'))
                 time_obj = time(hour, minute)
 
-                # Get coordinator
-                coordinator = None
-                for entry_id, data in hass.data.get(DOMAIN, {}).items():
-                    if isinstance(data, dict) and "coordinator" in data:
-                        coordinator = data["coordinator"]
-                        break
-
+                coordinator = get_coordinator(hass)
                 if not coordinator:
-                    return {"error": "Alarm system coordinator not found"}
-
-                # Determine satellite from LLM context if available
-                satellite = None
-                if hasattr(llm_context, "device_id") and llm_context.device_id:
-                    satellite = f"assist_satellite.{llm_context.device_id}"
+                    return {"error": "Coordinator not available"}
 
                 # Create service call data
                 service_data = {

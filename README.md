@@ -3,7 +3,7 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 ![beta_badge](https://img.shields.io/badge/Status-Beta-orange.svg)
 
-A Home Assistant integration that allows you to set alarms and reminders that will ring on your Home Assistant voice satellites or media players.
+A Home Assistant integration that allows you to set alarms and reminders that will ring on your Home Assistant voice satellites.
 
 > ⚠️ **Beta Status**: This integration is currently in beta and under active development. Features may change and bugs are expected. Please report any issues on the GitHub issue tracker.
 
@@ -12,11 +12,12 @@ A Home Assistant integration that allows you to set alarms and reminders that wi
 - Set alarms and reminders using voice commands or the dashboard
 - Custom sounds for alarms and reminders
 - Support for Home Assistant voice satellites
-- Optional media player support
 - Snooze and stop functionality
 - Dashboard controls
 - Stop all alarms/reminders functionality
 - Active alarms and reminders sensors with status tracking
+
+> **Note**: This integration functionality works on voice satellites only. If you want to use media players as an alternative to satellites, please use [HA-Alarm-Clock](https://github.com/nirnachmani/HA-Alarm-Clock) integration that's inspired by this project and built specifically for Alarms&Reminders on media players.
 
 ## Known Limitations
 - Limited error handling
@@ -46,7 +47,6 @@ This integration is actively being developed. Future updates will include:
 
 The integration can be configured through the UI:
 - Custom sound files for alarms and reminders
-- Optional media player selection for non-satellite playback
 
 ## Usage
 

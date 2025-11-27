@@ -145,7 +145,7 @@ else:
                         self.data = data
 
                 call = MockServiceCall(service_data)
-                target = {"satellite": satellite, "media_players": []}
+                target = {"satellite": satellite}
 
                 # Schedule the alarm using the coordinator
                 await coordinator.schedule_item(call, is_alarm=True, target=target)

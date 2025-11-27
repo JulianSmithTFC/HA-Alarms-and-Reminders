@@ -29,7 +29,6 @@ ATTR_MESSAGE = "message"        # The announcement message (optional)
 ATTR_ALARM_ID = "alarm_id"
 ATTR_SNOOZE_MINUTES = "minutes"
 ATTR_REMINDER_ID = "reminder_id"  
-ATTR_MEDIA_PLAYER = "media_player"
 ATTR_NAME = "name"             # Attribute name
 ATTR_NOTIFY_DEVICE = "notify_device"
 ATTR_NOTIFY_TITLE = "Alarm & Reminder"
@@ -37,7 +36,6 @@ ATTR_NOTIFY_TITLE = "Alarm & Reminder"
 # Configuration
 CONF_ALARM_SOUND = "alarm_sound"
 CONF_REMINDER_SOUND = "reminder_sound"
-CONF_MEDIA_PLAYER = "media_player"
 CONF_ENABLE_LLM = "enable_llm"
 
 # Defaults
@@ -46,7 +44,6 @@ DEFAULT_MESSAGE = "Reminder!"
 DEFAULT_SATELLITE = "default_satellite"
 DEFAULT_ALARM_SOUND = "/custom_components/alarms_and_reminders/sounds/alarms/birds.mp3"
 DEFAULT_REMINDER_SOUND = "/custom_components/alarms_and_reminders/sounds/reminders/ringtone.mp3"
-DEFAULT_MEDIA_PLAYER = None
 DEFAULT_SNOOZE_MINUTES = 5 # Default snooze time in minutes
 DEFAULT_NOTIFICATION_TITLE = "Alarm & Reminder"
 DEFAULT_ENABLE_LLM = True

@@ -236,7 +236,6 @@ class AlarmAndReminderCoordinator:
             item = {
                 "scheduled_time": scheduled_time,
                 "satellite": target.get("satellite"),
-                "media_players": target.get("media_players", []),
                 "message": message,
                 "is_alarm": is_alarm,
                 "repeat": repeat,
@@ -324,8 +323,6 @@ class AlarmAndReminderCoordinator:
 
             if item.get("satellite"):
                 await self._satellite_playback_loop(item, stop_event)
-            elif item.get("media_players"):
-                await self._media_player_playback_loop(item, stop_event)
             else:
                 _LOGGER.debug("No playback target for %s", item_id)
 
@@ -654,7 +651,7 @@ class AlarmAndReminderCoordinator:
                 item["scheduled_time"] = new_time
 
             # Update other fields if provided
-            for field in ["name", "message", "satellite", "media_player"]:
+            for field in ["name", "message", "satellite"]:
                 if field in changes:
                     item[field] = changes[field]
 
@@ -813,7 +810,7 @@ class AlarmAndReminderCoordinator:
                 item["scheduled_time"] = new_time
 
             # Update other fields if provided
-            for field in ["message", "satellite", "media_player"]:
+            for field in ["message", "satellite"]:
                 if field in changes:
                     item[field] = changes[field]
 
@@ -880,44 +877,6 @@ class AlarmAndReminderCoordinator:
         except Exception as err:
             _LOGGER.error("Satellite playback error for %s: %s", item.get("entity_id", "<unknown>"), err, exc_info=True)
             # mark item as error so storage doesn't crash and persist
-            try:
-                item_id = item.get("entity_id") or item.get("unique_id")
-                if item_id:
-                    item["status"] = "error"
-                    self._active_items[item_id] = item
-                    await self.storage.async_save(self._active_items)
-                    self.hass.states.async_set(f"{DOMAIN}.{item_id}", "error", item)
-                    self.hass.bus.async_fire(f"{DOMAIN}_state_changed")
-            except Exception:
-                _LOGGER.exception("Failed to persist error state")
-
-    async def _media_player_playback_loop(self, item: dict, stop_event: asyncio.Event) -> None:
-        """Playback loop for media_player targets."""
-        try:
-            media_players = item.get("media_players", []) or []
-            if not media_players:
-                _LOGGER.debug("No media players configured for item")
-                return
-
-            # Play on each media player concurrently with stop_event and name
-            tasks = []
-            for mp in media_players:
-                task = self.media_handler.play_on_media_player(
-                    mp,
-                    item.get("message", ""),
-                    item.get("is_alarm", False),
-                    stop_event=stop_event,
-                    name=item.get("name")
-                )
-                tasks.append(task)
-
-            # Wait for all media player tasks or until stopped
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-
-        except Exception as err:
-            _LOGGER.error("Media player playback error for %s: %s", item.get("entity_id", "<unknown>"), err, exc_info=True)
-            # persist error status
             try:
                 item_id = item.get("entity_id") or item.get("unique_id")
                 if item_id:

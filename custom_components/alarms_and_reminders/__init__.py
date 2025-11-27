@@ -39,13 +39,11 @@ from .const import (
     ATTR_ALARM_ID,        
     ATTR_REMINDER_ID,
     ATTR_SNOOZE_MINUTES,
-    ATTR_MEDIA_PLAYER,
     ATTR_NAME,
     ATTR_NOTIFY_DEVICE,  
     ATTR_NOTIFY_TITLE,      
     DEFAULT_SATELLITE,
     DEFAULT_SNOOZE_MINUTES,
-    CONF_MEDIA_PLAYER,
     CONF_ENABLE_LLM,
     DEFAULT_ENABLE_LLM,    
 )  
@@ -133,7 +131,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             vol.Optional(ATTR_NAME): str,  # Optional name for alarms
             vol.Optional(ATTR_MESSAGE): cv.string,
             vol.Optional(ATTR_SATELLITE): cv.entity_id,
-            vol.Optional(ATTR_MEDIA_PLAYER): vol.All(cv.ensure_list, [cv.entity_id]),
             vol.Optional("repeat", default="once"): vol.In(REPEAT_OPTIONS),
             vol.Optional("repeat_days"): vol.All(
                 cv.ensure_list,
@@ -152,7 +149,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             vol.Optional("date"): cv.date,
             vol.Optional(ATTR_MESSAGE): cv.string,
             vol.Optional(ATTR_SATELLITE): cv.entity_id,
-            vol.Optional(ATTR_MEDIA_PLAYER): vol.All(cv.ensure_list, [cv.entity_id]),
             vol.Optional("repeat", default="once"): vol.In(REPEAT_OPTIONS),
             vol.Optional("repeat_days"): vol.All(
                 cv.ensure_list,
@@ -169,15 +165,14 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         hass.data[DOMAIN]["coordinator"] = coordinator
 
         def validate_target(call: ServiceCall) -> dict:
-            """Validate that either satellite or media_player is provided."""
+            """Validate that the satellite is provided."""
             satellite = call.data.get(ATTR_SATELLITE)
-            media_players = call.data.get(ATTR_MEDIA_PLAYER, [])
 
-            if not satellite and not media_players:
+            if not satellite:
                 raise vol.Invalid("No valid target found. Configure a satellite or specify one or more media players.")
 
-            _LOGGER.debug("Validated target: satellite=%s, media_players=%s", satellite, media_players)
-            return {"satellite": satellite, "media_players": media_players}
+            _LOGGER.debug("Validated target: satellite=%s", satellite)
+            return {"satellite": satellite}
 
         async def async_schedule_alarm(call: ServiceCall):
             """Handle the alarm service call."""
@@ -430,7 +425,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 vol.Optional("name"): cv.string,
                 vol.Optional("message"): cv.string,
                 vol.Optional("satellite"): cv.entity_id,
-                vol.Optional("media_player"): cv.entity_id,
             })
         )
 
@@ -445,7 +439,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 vol.Optional("name"): cv.string,
                 vol.Optional("message"): cv.string,
                 vol.Optional("satellite"): cv.entity_id,
-                vol.Optional("media_player"): cv.entity_id,
             })
         )
 
@@ -699,7 +692,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 vol.Optional("date"): cv.date,
                 vol.Optional("message"): cv.string,
                 vol.Optional("satellite"): cv.entity_id,
-                vol.Optional("media_player"): cv.entity_id,
             })
         )
 
@@ -713,7 +705,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 vol.Optional("date"): cv.date,
                 vol.Optional("message"): cv.string,
                 vol.Optional("satellite"): cv.entity_id,
-                vol.Optional("media_player"): cv.entity_id,
             })
         )
 
@@ -768,13 +759,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async def _handle_set_alarm(call: ServiceCall) -> None:
             await coordinator.schedule_item(call, True, {
                 "satellite": call.data.get("satellite"),
-                "media_players": ([call.data.get("media_player")] if call.data.get("media_player") else [])
             })
 
         async def _handle_set_reminder(call: ServiceCall) -> None:
             await coordinator.schedule_item(call, False, {
                 "satellite": call.data.get("satellite"),
-                "media_players": ([call.data.get("media_player")] if call.data.get("media_player") else [])
             })
 
         async def _handle_stop(call: ServiceCall) -> None:

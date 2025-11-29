@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import voluptuous as vol
 from pathlib import Path
-from typing import Union, List, Dict
+from typing import Union, List, Dict, Optional
 from datetime import time, datetime
 
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -69,9 +69,6 @@ REPEAT_OPTIONS = [
     "custom"
 ]
 
-SERVICE_RESCHEDULE_ALARM = "reschedule_alarm"
-SERVICE_RESCHEDULE_REMINDER = "reschedule_reminder"
-
 DEFAULT_ALARM_SOUND = "/custom_components/alarms_and_reminders/sounds/alarms/birds.mp3"
 DEFAULT_REMINDER_SOUND = "/custom_components/alarms_and_reminders/sounds/reminders/ringtone.mp3"
 
@@ -93,14 +90,34 @@ async def _get_satellites(hass: HomeAssistant) -> list:
         _LOGGER.error("Error getting satellites list: %s", err, exc_info=True)
         return []
 
+async def _get_mobile_app_service_name(hass: HomeAssistant, device_id: str) -> Optional[str]:
+    """Convert device_id to mobile_app service name (e.g., mobile_app_sm_a528b)."""
+    try:
+        device_registry = dr.async_get(hass)
+        device = device_registry.async_get(device_id)
+        
+        if not device:
+            _LOGGER.warning("Device %s not found in registry", device_id)
+            return None
+        
+        # Get identifiers (mobile_app devices have identifiers like ('mobile_app', 'sm_a528b'))
+        for domain, identifier in device.identifiers:
+            if domain == "mobile_app":
+                service_name = f"mobile_app_{identifier}"
+                _LOGGER.debug("Converted device %s to service %s", device_id, service_name)
+                return service_name
+        
+        _LOGGER.warning("Device %s has no mobile_app identifier", device_id)
+        return None
+        
+    except Exception as err:
+        _LOGGER.error("Error converting device ID to service name: %s", err, exc_info=True)
+        return None
+
 PLATFORMS = ["switch"]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Alarms and Reminders integration (minimal)."""
-    # Only initialize the top-level data container here.
-    hass.data.setdefault(DOMAIN, {})
-    # return True
-
     try:
         # Initialize data structure
         hass.data.setdefault(DOMAIN, {})
@@ -137,10 +154,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 [vol.In(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])]
             ),
             vol.Optional("sound_file", default=DEFAULT_ALARM_SOUND): cv.string,
-            vol.Optional(ATTR_NOTIFY_DEVICE): vol.Any(
-                cv.string,  # Single device
-                vol.All(cv.ensure_list, [cv.string])  # List of devices
-            ),
+            vol.Optional(ATTR_NOTIFY_DEVICE): cv.string,  # Now device_id as string
         })
 
         REMINDER_SERVICE_SCHEMA = vol.Schema({
@@ -155,10 +169,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 [vol.In(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])]
             ),
             vol.Optional("sound_file", default=DEFAULT_REMINDER_SOUND): cv.string,
-            vol.Optional(ATTR_NOTIFY_DEVICE): vol.Any(
-                cv.string,  # Single device
-                vol.All(cv.ensure_list, [cv.string])  # List of devices
-            ),
+            vol.Optional(ATTR_NOTIFY_DEVICE): cv.string,  # Now device_id as string
         })
 
         # Store coordinator for future access
@@ -169,7 +180,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             satellite = call.data.get(ATTR_SATELLITE)
 
             if not satellite:
-                raise vol.Invalid("No valid target found. Configure a satellite or specify one or more media players.")
+                raise vol.Invalid("No valid target found. Configure a satellite.")
 
             _LOGGER.debug("Validated target: satellite=%s", satellite)
             return {"satellite": satellite}
@@ -177,11 +188,33 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         async def async_schedule_alarm(call: ServiceCall):
             """Handle the alarm service call."""
             target = validate_target(call)
+            
+            # Convert device_id to service name if provided
+            notify_device = call.data.get(ATTR_NOTIFY_DEVICE)
+            if notify_device:
+                service_name = await _get_mobile_app_service_name(hass, notify_device)
+                if service_name:
+                    # Store service name instead of device_id
+                    call.data[ATTR_NOTIFY_DEVICE] = service_name
+                else:
+                    # Clear if conversion failed
+                    call.data[ATTR_NOTIFY_DEVICE] = None
+            
             await coordinator.schedule_item(call, is_alarm=True, target=target)
 
         async def async_schedule_reminder(call: ServiceCall):
             """Handle the reminder service call."""
             target = validate_target(call)
+            
+            # Convert device_id to service name if provided
+            notify_device = call.data.get(ATTR_NOTIFY_DEVICE)
+            if notify_device:
+                service_name = await _get_mobile_app_service_name(hass, notify_device)
+                if service_name:
+                    call.data[ATTR_NOTIFY_DEVICE] = service_name
+                else:
+                    call.data[ATTR_NOTIFY_DEVICE] = None
+            
             await coordinator.schedule_item(call, is_alarm=False, target=target)
 
         # Register services with updated schema
@@ -198,7 +231,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             async_schedule_reminder,
             schema=REMINDER_SERVICE_SCHEMA,
         )
-
+            
         # Register reminder-specific services
         async def async_stop_reminder(call: ServiceCall):
             """Handle stop reminder service call."""
@@ -376,42 +409,50 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         )
 
         async def async_edit_alarm(call: ServiceCall):
-            """Handle edit alarm service call."""
+            """Edit an existing alarm – auto-enables after changes."""
             try:
-                # Create a mutable copy of the data
-                data = dict(call.data)
-                alarm_id = data.pop("alarm_id")
-                
-                coordinator = None
-                for entry_id, data_entry in hass.data[DOMAIN].items():
-                    if isinstance(data_entry, dict) and "coordinator" in data_entry:
-                        coordinator = data_entry["coordinator"]
-                        break
-                
-                if coordinator:
-                    await coordinator.edit_item(alarm_id, data, is_alarm=True)
-                
+                alarm_id = call.data.get("alarm_id")
+                if not alarm_id:
+                    raise ValueError("alarm_id is required")
+
+                coordinator = next(
+                    data["coordinator"]
+                    for data in hass.data[DOMAIN].values()
+                    if isinstance(data, dict) and "coordinator" in data
+                )
+
+                # Build changes dict – only include provided fields
+                changes = {}
+                for key in ["time", "date", "message", "satellite", "sound_file", "name", "repeat", "repeat_days", "notify_device"]:
+                    if key in call.data:
+                        changes[key] = call.data[key]
+
+
+                await coordinator.edit_item(alarm_id, changes)
             except Exception as err:
-                _LOGGER.error("Error editing alarm: %s", err, exc_info=True)
+                _LOGGER.error("Error editing alarm %s: %s", call.data.get("alarm_id"), err, exc_info=True)
 
         async def async_edit_reminder(call: ServiceCall):
-            """Handle edit reminder service call."""
+            """Edit an existing reminder – auto-enables after changes."""
             try:
-                # Create a mutable copy of the data
-                data = dict(call.data)
-                reminder_id = data.pop("reminder_id")
-                
-                coordinator = None
-                for entry_id, data_entry in hass.data[DOMAIN].items():
-                    if isinstance(data_entry, dict) and "coordinator" in data_entry:
-                        coordinator = data_entry["coordinator"]
-                        break
-                
-                if coordinator:
-                    await coordinator.edit_item(reminder_id, data, is_alarm=False)
-                
+                reminder_id = call.data.get("reminder_id")
+                if not reminder_id:
+                    raise ValueError("reminder_id is required")
+
+                coordinator = next(
+                    data["coordinator"]
+                    for data in hass.data[DOMAIN].values()
+                    if isinstance(data, dict) and "coordinator" in data
+                )
+
+                changes = {}
+                for key in ["time", "date", "message", "satellite", "sound_file", "name", "repeat", "repeat_days", "notify_device"]:
+                    if key in call.data:
+                        changes[key] = call.data[key]
+
+                await coordinator.edit_item(reminder_id, changes)
             except Exception as err:
-                _LOGGER.error("Error editing reminder: %s", err, exc_info=True)
+                _LOGGER.error("Error editing reminder %s: %s", call.data.get("reminder_id"), err, exc_info=True)
 
         # Register edit services
         hass.services.async_register(
@@ -460,7 +501,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                         break
                 
                 if coordinator:
-                    await coordinator.delete_item(alarm_id, is_alarm=True)
+                    await coordinator.delete_item(alarm_id)
                 else:
                     _LOGGER.error("No coordinator found")
                     
@@ -479,7 +520,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                         break
                 
                 if coordinator:
-                    await coordinator.delete_item(reminder_id, is_alarm=False)
+                    await coordinator.delete_item(reminder_id)
                 else:
                     _LOGGER.error("No coordinator found")
                     
@@ -496,7 +537,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                         break
                 
                 if coordinator:
-                    await coordinator.delete_all_items(is_alarm=True)
+                    await coordinator.delete_all_alarms(is_alarm=True)
                 else:
                     _LOGGER.error("No coordinator found")
                     
@@ -513,7 +554,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                         break
                 
                 if coordinator:
-                    await coordinator.delete_all_items(is_alarm=False)
+                    await coordinator.delete_all_reminders(is_alarm=False)
                 else:
                     _LOGGER.error("No coordinator found")
                     
@@ -641,72 +682,72 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             })
         )
 
-        async def async_reschedule_alarm(call: ServiceCall) -> None:
-            """Handle reschedule alarm service call."""
-            try:
-                alarm_id = call.data.get("alarm_id")
-                changes = {k: v for k, v in call.data.items() if k != "alarm_id"}
+        # async def async_reschedule_alarm(call: ServiceCall) -> None:
+        #     """Handle reschedule alarm service call."""
+        #     try:
+        #         alarm_id = call.data.get("alarm_id")
+        #         changes = {k: v for k, v in call.data.items() if k != "alarm_id"}
                 
-                coordinator = None
-                for entry_id, data in hass.data[DOMAIN].items():
-                    if isinstance(data, dict) and "coordinator" in data:
-                        coordinator = data["coordinator"]
-                        break
+        #         coordinator = None
+        #         for entry_id, data in hass.data[DOMAIN].items():
+        #             if isinstance(data, dict) and "coordinator" in data:
+        #                 coordinator = data["coordinator"]
+        #                 break
                 
-                if coordinator:
-                    await coordinator.reschedule_item(alarm_id, changes, is_alarm=True)
-                else:
-                    _LOGGER.error("No coordinator found")
+        #         if coordinator:
+        #             await coordinator.reschedule_item(alarm_id, changes, is_alarm=True)
+        #         else:
+        #             _LOGGER.error("No coordinator found")
                     
-            except Exception as err:
-                _LOGGER.error("Error rescheduling alarm: %s", err, exc_info=True)
+        #     except Exception as err:
+        #         _LOGGER.error("Error rescheduling alarm: %s", err, exc_info=True)
 
-        async def async_reschedule_reminder(call: ServiceCall) -> None:
-            """Handle reschedule reminder service call."""
-            try:
-                reminder_id = call.data.get("reminder_id")
-                changes = {k: v for k, v in call.data.items() if k != "reminder_id"}
+        # async def async_reschedule_reminder(call: ServiceCall) -> None:
+        #     """Handle reschedule reminder service call."""
+        #     try:
+        #         reminder_id = call.data.get("reminder_id")
+        #         changes = {k: v for k, v in call.data.items() if k != "reminder_id"}
                 
-                coordinator = None
-                for entry_id, data in hass.data[DOMAIN].items():
-                    if isinstance(data, dict) and "coordinator" in data:
-                        coordinator = data["coordinator"]
-                        break
+        #         coordinator = None
+        #         for entry_id, data in hass.data[DOMAIN].items():
+        #             if isinstance(data, dict) and "coordinator" in data:
+        #                 coordinator = data["coordinator"]
+        #                 break
                 
-                if coordinator:
-                    await coordinator.reschedule_item(reminder_id, changes, is_alarm=False)
-                else:
-                    _LOGGER.error("No coordinator found")
+        #         if coordinator:
+        #             await coordinator.reschedule_item(reminder_id, changes, is_alarm=False)
+        #         else:
+        #             _LOGGER.error("No coordinator found")
                     
-            except Exception as err:
-                _LOGGER.error("Error rescheduling reminder: %s", err, exc_info=True)
+        #     except Exception as err:
+        #         _LOGGER.error("Error rescheduling reminder: %s", err, exc_info=True)
 
-        # Register new services
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_RESCHEDULE_ALARM,
-            async_reschedule_alarm,
-            schema=vol.Schema({
-                vol.Required("alarm_id"): cv.entity_id,
-                vol.Optional("time"): cv.time,
-                vol.Optional("date"): cv.date,
-                vol.Optional("message"): cv.string,
-                vol.Optional("satellite"): cv.entity_id,
-            })
-        )
+        # # Register new services
+        # hass.services.async_register(
+        #     DOMAIN,
+        #     SERVICE_RESCHEDULE_ALARM,
+        #     async_reschedule_alarm,
+        #     schema=vol.Schema({
+        #         vol.Required("alarm_id"): cv.entity_id,
+        #         vol.Optional("time"): cv.time,
+        #         vol.Optional("date"): cv.date,
+        #         vol.Optional("message"): cv.string,
+        #         vol.Optional("satellite"): cv.entity_id,
+        #     })
+        # )
 
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_RESCHEDULE_REMINDER,
-            async_reschedule_reminder,
-            schema=vol.Schema({
-                vol.Required("reminder_id"): cv.entity_id,
-                vol.Optional("time"): cv.time,
-                vol.Optional("date"): cv.date,
-                vol.Optional("message"): cv.string,
-                vol.Optional("satellite"): cv.entity_id,
-            })
-        )
+        # hass.services.async_register(
+        #     DOMAIN,
+        #     SERVICE_RESCHEDULE_REMINDER,
+        #     async_reschedule_reminder,
+        #     schema=vol.Schema({
+        #         vol.Required("reminder_id"): cv.entity_id,
+        #         vol.Optional("time"): cv.time,
+        #         vol.Optional("date"): cv.date,
+        #         vol.Optional("message"): cv.string,
+        #         vol.Optional("satellite"): cv.entity_id,
+        #     })
+        # )
 
         return True
 
@@ -759,12 +800,67 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async def _handle_set_alarm(call: ServiceCall) -> None:
             await coordinator.schedule_item(call, True, {
                 "satellite": call.data.get("satellite"),
+                "notify_device": call.data.get("notify_device"),
             })
 
         async def _handle_set_reminder(call: ServiceCall) -> None:
             await coordinator.schedule_item(call, False, {
                 "satellite": call.data.get("satellite"),
+                "notify_device": call.data.get("notify_device"),
             })
+
+        async def _handle_edit_alarm(call: ServiceCall) -> None:
+            """Edit an existing alarm – auto-enables and validates audio choice."""
+            try:
+                alarm_id = call.data.get("alarm_id")
+                if not alarm_id:
+                    raise ValueError("alarm_id is required for edit_alarm")
+
+                # Safe coordinator lookup
+                coordinator = next(
+                    (data["coordinator"] for data in hass.data[DOMAIN].values()
+                    if isinstance(data, dict) and "coordinator" in data),
+                    None
+                )
+                if not coordinator:
+                    raise RuntimeError("Coordinator not found")
+
+                # Build changes dict (only provided fields)
+                changes = {}
+                for key in ["time", "date", "message", "satellite", "sound_file", "name", "repeat", "repeat_days", "notify_device"]:
+                    if key in call.data:
+                        changes[key] = call.data[key]
+
+                await coordinator.edit_item(alarm_id, changes)
+                _LOGGER.info("Alarm %s edited successfully", alarm_id)
+            except Exception as err:
+                _LOGGER.error("Error editing alarm %s: %s", call.data.get("alarm_id"), err, exc_info=True)
+
+        async def _handle_edit_reminder(call: ServiceCall) -> None:
+            """Edit an existing reminder – auto-enables and validates audio choice."""
+            try:
+                reminder_id = call.data.get("reminder_id")
+                if not reminder_id:
+                    raise ValueError("reminder_id is required for edit_reminder")
+
+                coordinator = next(
+                    (data["coordinator"] for data in hass.data[DOMAIN].values()
+                    if isinstance(data, dict) and "coordinator" in data),
+                    None
+                )
+                if not coordinator:
+                    raise RuntimeError("Coordinator not found")
+
+
+                changes = {}
+                for key in ["time", "date", "message", "satellite", "sound_file", "name", "repeat", "repeat_days", "notify_device"]:
+                    if key in call.data:
+                        changes[key] = call.data[key]
+
+                await coordinator.edit_item(reminder_id, changes)
+                _LOGGER.info("Reminder %s edited successfully", reminder_id)
+            except Exception as err:
+                _LOGGER.error("Error editing reminder %s: %s", call.data.get("reminder_id"), err, exc_info=True)
 
         async def _handle_stop(call: ServiceCall) -> None:
             # target can be an entity_id or alarm_id field; adapt to your coordinator API
@@ -792,6 +888,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_register(DOMAIN, "stop", _handle_stop)
         hass.services.async_register(DOMAIN, "snooze", _handle_snooze)
         hass.services.async_register(DOMAIN, "delete", _handle_delete)
+        hass.services.async_register(DOMAIN, "edit_alarm", _handle_edit_alarm)
+        hass.services.async_register(DOMAIN, "edit_reminder", _handle_edit_reminder)
         # ...register other services (reschedule, edit, stop_all, etc.) similarly...
         # -----------------------------------------------------------------------
         # Set up LLM API for voice assistant integration if enabled
@@ -873,20 +971,13 @@ async def async_stop_all(call: ServiceCall):
 async def async_delete_alarm(call: ServiceCall) -> None:
     """Handle delete alarm service call."""
     try:
-        alarm_id = call.data.get("alarm_id")
-        coordinator = None
-        
-        # Look for coordinator in hass.data instead of call.data
-        for entry_id, data in hass.data[DOMAIN].items():
-            if isinstance(data, dict) and "coordinator" in data:
-                coordinator = data["coordinator"]
-                break
-        
+        alarm_id = call.data.get("alarm_id") or call.data.get("reminder_id")  # Unified
+        coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]  # Get coordinator safely
+
         if coordinator:
-            await coordinator.delete_item(alarm_id, is_alarm=True)
+            await coordinator.delete_item(alarm_id)  # No is_alarm needed
         else:
             _LOGGER.error("No coordinator found")
-            
     except Exception as err:
         _LOGGER.error("Error deleting alarm: %s", err, exc_info=True)
 
@@ -894,72 +985,26 @@ async def async_delete_reminder(call: ServiceCall) -> None:
     """Handle delete reminder service call."""
     try:
         reminder_id = call.data.get("reminder_id")
-        coordinator = None
-        
-        # Look for coordinator in hass.data instead of call.data
-        for entry_id, data in hass.data[DOMAIN].items():
-            if isinstance(data, dict) and "coordinator" in data:
-                coordinator = data["coordinator"]
-                break
-        
+        coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]
+
         if coordinator:
-            await coordinator.delete_item(reminder_id, is_alarm=False)
+            await coordinator.delete_item(reminder_id)
         else:
             _LOGGER.error("No coordinator found")
-            
     except Exception as err:
         _LOGGER.error("Error deleting reminder: %s", err, exc_info=True)
 
 async def async_delete_all_alarms(call: ServiceCall) -> None:
-    """Handle delete all alarms service call."""
-    try:
-        coordinator = None
-        # Look for coordinator in hass.data instead of call.data
-        for entry_id, data in hass.data[DOMAIN].items():
-            if isinstance(data, dict) and "coordinator" in data:
-                coordinator = data["coordinator"]
-                break
-        
-        if coordinator:
-            await coordinator.delete_all_items(is_alarm=True)
-        else:
-            _LOGGER.error("No coordinator found")
-            
-    except Exception as err:
-        _LOGGER.error("Error deleting all alarms: %s", err, exc_info=True)
+    coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]
+    if coordinator:
+        await coordinator.delete_all_items(is_alarm=True)
 
 async def async_delete_all_reminders(call: ServiceCall) -> None:
-    """Handle delete all reminders service call."""
-    try:
-        coordinator = None
-        # Look for coordinator in hass.data instead of call.data
-        for entry_id, data in hass.data[DOMAIN].items():
-            if isinstance(data, dict) and "coordinator" in data:
-                coordinator = data["coordinator"]
-                break
-        
-        if coordinator:
-            await coordinator.delete_all_items(is_alarm=False)
-        else:
-            _LOGGER.error("No coordinator found")
-            
-    except Exception as err:
-        _LOGGER.error("Error deleting all reminders: %s", err, exc_info=True)
+    coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]
+    if coordinator:
+        await coordinator.delete_all_items(is_alarm=False)
 
 async def async_delete_all(call: ServiceCall) -> None:
-    """Handle delete all service call."""
-    try:
-        coordinator = None
-        # Look for coordinator in hass.data instead of call.data
-        for entry_id, data in hass.data[DOMAIN].items():
-            if isinstance(data, dict) and "coordinator" in data:
-                coordinator = data["coordinator"]
-                break
-        
-        if coordinator:
-            await coordinator.delete_all_items()
-        else:
-            _LOGGER.error("No coordinator found")
-            
-    except Exception as err:
-        _LOGGER.error("Error deleting all items: %s", err, exc_info=True)
+    coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]
+    if coordinator:
+        await coordinator.delete_all_items()

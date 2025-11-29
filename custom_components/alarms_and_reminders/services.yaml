@@ -24,16 +24,10 @@ set_alarm:
         date: {}
     satellite:
       name: Satellite
-      description: The satellite to announce the alarm on (mutually exclusive with media_player)
+      description: The satellite to announce the alarm on
       selector:
         entity:
           domain: assist_satellite
-    media_player:
-      name: Media Player
-      description: Media player to play alarm on (mutually exclusive with satellite)
-      selector:
-        entity:
-          domain: media_player
     message:
       name: Message
       description: Optional message to announce
@@ -78,15 +72,12 @@ set_alarm:
           multiline: false
     notify_device:
       name: Notify Device
-      description: >-
-        Mobile app device ID (e.g., mobile_app_sm_a528b). 
-        You can find your device ID in Mobile App integration notification services.
-        Do not include 'notify.' prefix.
+      description: Mobile app device to send notification to
       required: false
-      example: "mobile_app_sm_a528b"
       selector:
-        text:
-          multiline: false
+        device:
+          integration: mobile_app
+          multiple: false
 
 set_reminder:
   name: Set Reminder
@@ -114,17 +105,11 @@ set_reminder:
         date: {}
     satellite:
       name: Satellite
-      description: The satellite to announce the reminder on (mutually exclusive with media_player)
+      description: The satellite to announce the reminder on
       example: "default_satellite"
       selector:
         entity:
           domain: assist_satellite
-    media_player:
-      name: Media Player
-      description: Media player to play reminder on (mutually exclusive with satellite)
-      selector:
-        entity:
-          domain: media_player
     message:
       name: Message
       description: Optional message to announce
@@ -168,15 +153,12 @@ set_reminder:
           multiline: false
     notify_device:
       name: Notify Device
-      description: >-
-        Mobile app device ID (e.g., mobile_app_sm_a528b). 
-        You can find your device ID in Mobile App integration notification services.
-        Do not include 'notify.' prefix.
+      description: Mobile app device to send notification to
       required: false
-      example: "mobile_app_sm_a528b"
       selector:
-        text:
-          multiline: false
+        device:
+          integration: mobile_app
+          multiple: false
 
 stop_alarm:
   name: Stop Alarm
@@ -335,13 +317,14 @@ edit_alarm:
       selector:
         entity:
           domain: assist_satellite
-    media_player:
-      name: Media Player
-      description: New media player for the alarm
+    notify_device:
+      name: Notify Device
+      description: Mobile app device to send notification to
       required: false
       selector:
-        entity:
-          domain: media_player
+        device:
+          integration: mobile_app
+          multiple: false
 
 edit_reminder:
   name: Edit Reminder
@@ -386,13 +369,14 @@ edit_reminder:
       selector:
         entity:
           domain: assist_satellite
-    media_player:
-      name: Media Player
-      description: New media player for the reminder
+    notify_device:
+      name: Notify Device
+      description: Mobile app device to send notification to
       required: false
       selector:
-        entity:
-          domain: media_player
+        device:
+          integration: mobile_app
+          multiple: false
 
 delete_alarm:
   name: Delete Alarm
@@ -433,90 +417,4 @@ delete_all:
   description: Delete all alarms and reminders
   fields: {}
 
-reschedule_alarm:
-  name: Reschedule Alarm
-  description: Reschedule a stopped or completed alarm
-  fields:
-    alarm_id:
-      name: Alarm
-      description: The alarm to reschedule
-      required: true
-      selector:
-        entity:
-          domain: alarms_and_reminders
-    time:
-      name: Time
-      description: New time for the alarm (optional)
-      required: false
-      selector:
-        time: {}
-    date:
-      name: Date
-      description: New date for the alarm (optional)
-      required: false
-      selector:
-        date: {}
-    message:
-      name: Message
-      description: New message (optional)
-      required: false
-      selector:
-        text: {}
-    satellite:
-      name: Satellite
-      description: New satellite (optional)
-      required: false
-      selector:
-        entity:
-          domain: assist_satellite
-    media_player:
-      name: Media Player
-      description: New media player (optional)
-      required: false
-      selector:
-        entity:
-          domain: media_player
 
-reschedule_reminder:
-  name: Reschedule Reminder
-  description: Reschedule a stopped or completed reminder
-  fields:
-    reminder_id:
-      name: Reminder
-      description: The reminder to reschedule
-      required: true
-      selector:
-        entity:
-          domain: alarms_and_reminders
-    time:
-      name: Time
-      description: New time for the reminder (optional)
-      required: false
-      selector:
-        time: {}
-    date:
-      name: Date
-      description: New date for the reminder (optional)
-      required: false
-      selector:
-        date: {}
-    message:
-      name: Message
-      description: New message (optional)
-      required: false
-      selector:
-        text: {}
-    satellite:
-      name: Satellite
-      description: New satellite (optional)
-      required: false
-      selector:
-        entity:
-          domain: assist_satellite
-    media_player:
-      name: Media Player
-      description: New media player (optional)
-      required: false
-      selector:
-        entity:
-          domain: media_player

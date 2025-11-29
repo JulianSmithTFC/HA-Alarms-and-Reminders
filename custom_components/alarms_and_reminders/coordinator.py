@@ -371,15 +371,8 @@ class AlarmAndReminderCoordinator:
             if not device_id:
                 return
 
-            # Accept either "mobile_app_xxx" or "notify.mobile_app_xxx" or just device id
-            # Normalize to notify service target (service = mobile_app_xxx)
-            if device_id.startswith("notify."):
-                service_target = device_id.split(".", 1)[1]
-            elif device_id.startswith("mobile_app_"):
-                service_target = device_id
-            else:
-                # user provided raw id (e.g. mobile_app_sm_a528b) or 'sm_a528b' - assume mobile_app_ prefix if missing 'mobile_app_'
-                service_target = device_id if device_id.startswith("mobile_app_") else f"mobile_app_{device_id}"
+            # device_id is now already a service name like "mobile_app_sm_a528b"
+            service_target = device_id
 
             message = item.get("message") or f"It's {dt_util.now().strftime('%I:%M %p')}"
             payload = {

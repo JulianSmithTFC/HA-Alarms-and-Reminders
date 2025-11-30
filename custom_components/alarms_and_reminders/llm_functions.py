@@ -13,21 +13,12 @@ try:
 except Exception:
     llm = None  # type: ignore
 
-from .alarm_tools import DeleteAlarmTool, ListAlarmsTool, SetAlarmTool
-from .reminder_tools import DeleteReminderTool, ListRemindersTool, SetReminderTool
-from .alarm_control_tools import SnoozeAlarmTool, StopAlarmTool, SnoozeReminderTool, StopReminderTool
 from .const import DOMAIN
+from .llm_helpers import get_coordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 ALARM_REMINDER_API_NAME = "Alarm and Reminder Management"
-
-def get_coordinator(hass: HomeAssistant):
-    """Get the coordinator from hass.data - shared helper function."""
-    for entry_id, data in hass.data.get(DOMAIN, {}).items():
-        if isinstance(data, dict) and "coordinator" in data:
-            return data["coordinator"]
-    return None
 
 ALARM_REMINDER_SERVICES_PROMPT = """
 You have access to alarm and reminder management tools to help users manage their alarms and reminders.
@@ -63,6 +54,11 @@ if llm is not None:
             self, llm_context: "llm.LLMContext"
         ) -> "llm.APIInstance":
             """Get API instance."""
+            # Import tools here to avoid circular imports
+            from .alarm_tools import DeleteAlarmTool, ListAlarmsTool, SetAlarmTool
+            from .reminder_tools import DeleteReminderTool, ListRemindersTool, SetReminderTool
+            from .alarm_control_tools import SnoozeAlarmTool, StopAlarmTool, SnoozeReminderTool, StopReminderTool
+            
             tools = [
                 SetAlarmTool(),
                 ListAlarmsTool(),
@@ -103,38 +99,27 @@ if llm is not None:
 
             # Call the tool's async function
             try:
-                if tool_name in ["set_alarm", "set_reminder"]:
-                    # For set commands, directly call the tool with parsed input
-                    result = await tool.async_run(hass, parsed_input, llm_context)
-                else:
-                    # For other tools, use the coordinator context
-                    coordinator = None
-                    for entry_id, data in hass.data.get(DOMAIN, {}).items():
-                        if isinstance(data, dict) and "coordinator" in data:
-                            coordinator = data["coordinator"]
-                            break
-                    if not coordinator:
-                        return {"error": "Coordinator not available"}
+                coordinator = get_coordinator(hass)
+                if not coordinator:
+                    return {"error": "Coordinator not available"}
 
-                    # Derive satellite from llm_context.device_id if available
-                    satellite = None
-                    if hasattr(llm_context, "device_id") and llm_context.device_id:
-                        satellite = f"assist_satellite.{llm_context.device_id}"
+                # Derive satellite from llm_context.device_id if available
+                satellite = None
+                if hasattr(llm_context, "device_id") and llm_context.device_id:
+                    satellite = f"assist_satellite.{llm_context.device_id}"
 
-                    # Prepare service data
-                    service_data = {
-                        "coordinator": coordinator,
-                        "satellite": satellite,
-                        **parsed_input,
-                    }
+                # Prepare service data
+                service_data = {
+                    "coordinator": coordinator,
+                    "satellite": satellite,
+                    **parsed_input,
+                }
 
-                    # Call the appropriate service based on the tool
-                    if tool_name in ["list_alarms", "list_reminders"]:
-                        result = await tool.async_run(hass, service_data, llm_context)
-                    else:
-                        result = await tool.async_run(hass, service_data, llm_context)
+                # Call the tool
+                result = await tool.async_call(hass, tool_input, llm_context)
 
             except Exception as e:
+                _LOGGER.exception("Error calling tool %s", tool_name)
                 return {"error": str(e)}
 
             return result
@@ -206,8 +191,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault(entry.entry_id, {})
 
-    # create coordinator/storage/etc...
-
     # LLM: optionally register API if enabled in entry options (or default True)
     enable_llm = entry.options.get("enable_llm", entry.data.get("enable_llm", True))
     if enable_llm:
@@ -228,5 +211,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await async_cleanup_llm_api(hass)
         except Exception:
             _LOGGER.exception("Failed to cleanup LLM API")
-    # ...existing code...
+    return True
 

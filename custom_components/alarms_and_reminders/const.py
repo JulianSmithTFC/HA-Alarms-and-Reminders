@@ -22,6 +22,12 @@ SERVICE_DELETE_ALL_ALARMS = "delete_all_alarms"
 SERVICE_DELETE_ALL_REMINDERS = "delete_all_reminders"
 SERVICE_DELETE_ALL = "delete_all"
 
+# Dispatcher event names (for coordinator/switch communication)
+EVENT_ITEM_CREATED = f"{DOMAIN}_item_created"
+EVENT_ITEM_UPDATED = f"{DOMAIN}_item_updated"
+EVENT_ITEM_DELETED = f"{DOMAIN}_item_deleted"
+EVENT_DASHBOARD_UPDATED = f"{DOMAIN}_dashboard_updated"
+
 # Attributes
 ATTR_DATETIME = "datetime"      # A string containing the reminder time
 ATTR_SATELLITE = "satellite"    # The satellite ID to announce the reminder on

@@ -7,26 +7,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
-from homeassistant.core import HomeAssistant
+import librosa
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.network import get_url
 
 _LOGGER = logging.getLogger(__name__)
 
-try:
-    import librosa
-    HAS_LIBROSA = True
-except ImportError:
-    HAS_LIBROSA = False
-    _LOGGER.warning("librosa not installed; using fallback duration detection")
-
 
 class AudioDurationDetector:
-    """Detect audio file duration using librosa or fallback methods."""
+    """Detect audio file duration using librosa."""
     
     @staticmethod
     def get_duration(audio_path: str) -> float:
-        """Get audio duration in seconds.
+        """Get audio duration in seconds using librosa.
         
         Returns duration in seconds, or 5.0 as fallback if unable to detect.
         """
@@ -35,46 +29,12 @@ class AudioDurationDetector:
                 _LOGGER.warning("Audio file not found: %s", audio_path)
                 return 5.0
             
-            if HAS_LIBROSA:
-                try:
-                    duration = librosa.get_duration(filename=audio_path)
-                    _LOGGER.debug("librosa detected duration: %.2f seconds for %s", duration, audio_path)
-                    return float(duration)
-                except Exception as e:
-                    _LOGGER.debug("librosa failed: %s, trying ffprobe", e)
-            
-            # Fallback: try ffprobe
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ["ffprobe", "-v", "error", "-show_entries", "format=duration", 
-                     "-of", "default=noprint_wrappers=1:nokey=1:noprint_wrappers=1", 
-                     audio_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if result.returncode == 0:
-                    duration = float(result.stdout.strip())
-                    _LOGGER.debug("ffprobe detected duration: %.2f seconds for %s", duration, audio_path)
-                    return duration
-            except Exception as e:
-                _LOGGER.debug("ffprobe failed: %s", e)
-            
-            # Final fallback: estimate based on file size (very rough)
-            try:
-                file_size = os.path.getsize(audio_path)
-                # Assume ~128 kbps = ~16000 bytes/sec (very rough estimate)
-                estimated_duration = file_size / 16000
-                _LOGGER.debug("Estimated duration from file size: %.2f seconds for %s", estimated_duration, audio_path)
-                return max(3.0, min(estimated_duration, 30.0))  # Clamp between 3-30 seconds
-            except Exception as e:
-                _LOGGER.debug("File size estimation failed: %s", e)
-            
-            return 5.0  # Default fallback
+            duration = librosa.get_duration(filename=audio_path)
+            _LOGGER.debug("librosa detected duration: %.2f seconds for %s", duration, audio_path)
+            return float(duration)
             
         except Exception as err:
-            _LOGGER.error("Error detecting audio duration: %s", err)
+            _LOGGER.error("Error detecting audio duration for %s: %s", audio_path, err)
             return 5.0
 
 
@@ -105,15 +65,14 @@ class SatelliteStateMonitor:
                 )
                 
                 # Notify callbacks
-                for callback in self._state_change_callbacks:
+                for cb in self._state_change_callbacks:
                     try:
                         self.hass.async_create_task(
-                            callback(old_status, new_status)
+                            cb(old_status, new_status)
                         )
                     except Exception as e:
                         _LOGGER.error("Error in state change callback: %s", e)
         
-        from homeassistant.core import callback
         self._unsub_state_changed = self.hass.bus.async_listen(
             "state_changed",
             _on_state_changed

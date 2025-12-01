@@ -318,8 +318,11 @@ async def async_setup_entry(
             # Stop if active
             if item_id in coordinator._stop_events:
                 coordinator._stop_events[item_id].set()
+                await asyncio.sleep(0.1)
+                coordinator._stop_events.pop(item_id, None)
 
-            await coordinator.announcer.stop_announcement(item_id)
+            # Stop satellite ring if it was ringing
+            await coordinator.announcer.stop_satellite_ring(item_id)
 
             # Delete from memory and storage
             coordinator._active_items.pop(item_id, None)
@@ -356,8 +359,11 @@ async def async_setup_entry(
                 # Stop if active
                 if item_id in coordinator._stop_events:
                     coordinator._stop_events[item_id].set()
+                    await asyncio.sleep(0.1)
+                    coordinator._stop_events.pop(item_id, None)
 
-                await coordinator.announcer.stop_announcement(item_id)
+                # Stop satellite ring if it was ringing
+                await coordinator.announcer.stop_satellite_ring(item_id)
 
                 # Delete from memory and storage
                 coordinator._active_items.pop(item_id, None)

@@ -8,5 +8,6 @@ setup(
         'voluptuous>=0.13.1',
         'homeassistant>=2024.3.3',
         'aiofiles>=23.2.1',
+        'librosa>=0.10.0',
     ],
 )

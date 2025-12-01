@@ -67,7 +67,7 @@ async def async_setup_entry(
     hass.data[DOMAIN][entry.entry_id]["entities"] = entities
 
     # Register services (only once per config entry)
-    platform = EntityPlatform(hass, "switch", entry, _LOGGER)
+    # platform = EntityPlatform(hass, "switch", entry, _LOGGER)
 
     # Get mobile app devices
     async def _get_mobile_devices() -> list[dict]:

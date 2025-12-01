@@ -156,7 +156,7 @@ class AlarmReminderStorage:
     @callback
     def async_schedule_save(self) -> None:
         """Schedule a debounced save to disk after SAVE_DELAY seconds."""
-        # cancel previous scheduled save (async_call_later returns a cancel function)
+        # cancel previous scheduled save
         if self._save_handle:
             try:
                 self._save_handle()
@@ -164,12 +164,18 @@ class AlarmReminderStorage:
                 pass
             self._save_handle = None
 
-        def _do_save(now):
-            # create task to perform actual save
+        # Use async_call_later with proper callback signature
+        async def _schedule_callback(now):
+            """Callback to schedule the save task (called from event loop)."""
+            # Create task from within event loop thread (safe)
             self.hass.async_create_task(self.async_save())
 
-        # schedule save using HA helper; it returns a cancel function we store
-        self._save_handle = async_call_later(self.hass, SAVE_DELAY, _do_save)
+        # Schedule using HA's helper
+        self._save_handle = async_call_later(
+            self.hass,
+            SAVE_DELAY,
+            _schedule_callback
+        )
 
     async def async_save(self, items: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
         """Persist flattened items mapping to storage using grouped structure.

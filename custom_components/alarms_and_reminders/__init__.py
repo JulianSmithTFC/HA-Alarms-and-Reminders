@@ -72,23 +72,23 @@ REPEAT_OPTIONS = [
 DEFAULT_ALARM_SOUND = "/custom_components/alarms_and_reminders/sounds/alarms/birds.mp3"
 DEFAULT_REMINDER_SOUND = "/custom_components/alarms_and_reminders/sounds/reminders/ringtone.mp3"
 
-async def _get_satellites(hass: HomeAssistant) -> list:
-    """Get list of configured assist satellites."""
-    try:
-        satellites = [
-            entity_id.split('.')[1]  # Extract satellite ID
-            for entity_id in hass.states.async_entity_ids("assist_satellite")
-        ]
+# async def _get_satellites(hass: HomeAssistant) -> list:
+#     """Get list of configured assist satellites."""
+#     try:
+#         satellites = [
+#             entity_id.split('.')[1]  # Extract satellite ID
+#             for entity_id in hass.states.async_entity_ids("assist_satellite")
+#         ]
         
-        if not satellites:
-            _LOGGER.warning("No satellites found, functionality may be limited")
-            satellites = ["default_satellite"]  # Add a default satellite for testing
+#         if not satellites:
+#             _LOGGER.warning("No satellites found, functionality may be limited")
+#             satellites = ["default_satellite"]  # Add a default satellite for testing
         
-        _LOGGER.debug("Available satellites: %s", satellites)
-        return satellites
-    except Exception as err:
-        _LOGGER.error("Error getting satellites list: %s", err, exc_info=True)
-        return []
+#         _LOGGER.debug("Available satellites: %s", satellites)
+#         return satellites
+#     except Exception as err:
+#         _LOGGER.error("Error getting satellites list: %s", err, exc_info=True)
+#         return []
 
 async def _get_mobile_app_service_name(hass: HomeAssistant, device_id: str) -> Optional[str]:
     """Convert device_id to mobile_app service name (e.g., mobile_app_sm_a528b)."""
@@ -139,7 +139,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             hass.data[DOMAIN] = {"entities": []}  # Initialize the entities list
 
         # Get available satellites
-        satellites = await _get_satellites(hass)
+        # satellites = await _get_satellites(hass)
         
         # Dynamic schema based on available satellites and media players
         ALARM_SERVICE_SCHEMA = vol.Schema({

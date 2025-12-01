@@ -2,7 +2,7 @@
 import logging
 import asyncio
 import re
-from typing import Dict, Any
+from typing import Dict, Any, Callable, Optional
 from datetime import datetime, timedelta
 
 from homeassistant.core import HomeAssistant, ServiceCall, callback
@@ -34,6 +34,7 @@ class AlarmAndReminderCoordinator:
         self.announcer = announcer
         self._active_items: Dict[str, Dict[str, Any]] = {}
         self._stop_events: Dict[str, asyncio.Event] = {}
+        self._trigger_cancel_funcs: Dict[str, Callable] = {}  # Track scheduled triggers
         self.storage = AlarmReminderStorage(hass)
         
         # Load existing items from states
@@ -83,6 +84,41 @@ class AlarmAndReminderCoordinator:
                 return potential_id
             counter += 1
 
+    def _schedule_item(self, item_id: str, scheduled_time: datetime) -> None:
+        """Schedule an item to trigger at a specific time.
+        
+        This is used by switch.py to re-schedule after enable/edit.
+        """
+        try:
+            # Cancel existing trigger if any
+            if item_id in self._trigger_cancel_funcs:
+                try:
+                    self._trigger_cancel_funcs[item_id]()
+                except Exception as e:
+                    _LOGGER.debug("Error canceling old trigger for %s: %s", item_id, e)
+                del self._trigger_cancel_funcs[item_id]
+            
+            # Create a safe callback that properly handles the event loop
+            async def _trigger_callback(now_dt: datetime) -> None:
+                """Callback to trigger item - safe for any thread."""
+                try:
+                    await self._trigger_item(item_id)
+                except Exception as err:
+                    _LOGGER.error("Error in trigger callback for %s: %s", item_id, err)
+            
+            # Schedule new trigger with async callback
+            cancel_func = async_track_point_in_time(
+                self.hass,
+                _trigger_callback,
+                scheduled_time,
+            )
+            self._trigger_cancel_funcs[item_id] = cancel_func
+            
+            _LOGGER.debug("Scheduled item %s for %s", item_id, scheduled_time)
+            
+        except Exception as err:
+            _LOGGER.error("Error scheduling item %s: %s", item_id, err, exc_info=True)
+
     async def async_load_items(self) -> None:
         """Load items from storage and restore internal state."""
         try:
@@ -110,14 +146,8 @@ class AlarmAndReminderCoordinator:
                         sched = dt_util.parse_datetime(sched)
                         item["scheduled_time"] = sched
 
-                    if isinstance(sched, datetime) and sched > now:
-                        async_track_point_in_time(
-                            self.hass,
-                            lambda now_dt, iid=item_id: self.hass.async_create_task(
-                                self._trigger_item(iid)
-                            ),
-                            sched
-                        )
+                    if isinstance(sched, datetime) and sched > now and item.get("enabled", True):
+                        self._schedule_item(item_id, sched)
 
             self._update_dashboard_state()
             async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
@@ -198,18 +228,12 @@ class AlarmAndReminderCoordinator:
             self._active_items[item_name] = item
             await self.storage.async_save(self._active_items)
 
+            # Schedule the trigger
+            self._schedule_item(item_name, scheduled_time)
+
             self._update_dashboard_state()
             async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
             async_dispatcher_send(self.hass, ITEM_CREATED, item_name, item)
-
-            # Schedule trigger
-            async_track_point_in_time(
-                self.hass,
-                lambda now_dt, iid=item_name: self.hass.async_create_task(
-                    self._trigger_item(iid)
-                ),
-                scheduled_time,
-            )
 
             _LOGGER.info(
                 "Scheduled %s %s for %s",
@@ -229,6 +253,11 @@ class AlarmAndReminderCoordinator:
 
         try:
             item = self._active_items[item_id]
+
+            # Check if item is enabled
+            if not item.get("enabled", True):
+                _LOGGER.debug("Item %s is disabled, skipping trigger", item_id)
+                return
 
             item["status"] = "active"
             self._active_items[item_id] = item
@@ -254,11 +283,13 @@ class AlarmAndReminderCoordinator:
 
         except Exception as err:
             _LOGGER.error("Error triggering item %s: %s", item_id, err, exc_info=True)
-            item["status"] = "error"
-            self._active_items[item_id] = item
-            await self.storage.async_save(self._active_items)
-            self._update_dashboard_state()
-            async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, self._active_items[item_id])
+            if item_id in self._active_items:
+                item = self._active_items[item_id]
+                item["status"] = "error"
+                self._active_items[item_id] = item
+                self.hass.async_create_task(self.storage.async_save(self._active_items))
+                self._update_dashboard_state()
+                async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, self._active_items[item_id])
 
     async def _start_playback(self, item_id: str) -> None:
         """Start playback for active item."""
@@ -284,7 +315,6 @@ class AlarmAndReminderCoordinator:
                     self._active_items[item_id]["status"] = "stopped"
                     self._active_items[item_id]["last_stopped"] = dt_util.now().isoformat()
                     await self.storage.async_save(self._active_items)
-                    # keep dashboard in sync
                     self._update_dashboard_state()
                     async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, self._active_items[item_id])
 
@@ -295,7 +325,7 @@ class AlarmAndReminderCoordinator:
             _LOGGER.error("Error in playback for %s: %s", item_id, err, exc_info=True)
             if item_id in self._active_items:
                 self._active_items[item_id]["status"] = "error"
-                await self.storage.async_save(self._active_items)
+                self.hass.async_create_task(self.storage.async_save(self._active_items))
                 async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, self._active_items[item_id])
 
     async def _satellite_playback_loop(self, item: dict, stop_event: asyncio.Event) -> None:
@@ -366,21 +396,20 @@ class AlarmAndReminderCoordinator:
 
             if action == "stop":
                 self.hass.async_create_task(
-                    self.stop_item(item_id, self._active_items[item_id]["is_alarm"])
+                    self.stop_item(item_id)
                 )
             elif action == "snooze":
                 self.hass.async_create_task(
                     self.snooze_item(
                         item_id,
                         DEFAULT_SNOOZE_MINUTES,
-                        self._active_items[item_id]["is_alarm"]
                     )
                 )
 
         except Exception as err:
             _LOGGER.error("Error handling notification action: %s", err, exc_info=True)
 
-    async def stop_item(self, item_id: str, is_alarm: bool) -> None:
+    async def stop_item(self, item_id: str) -> None:
         """Stop an active or scheduled item."""
         try:
             if item_id.startswith(f"{DOMAIN}."):
@@ -391,19 +420,18 @@ class AlarmAndReminderCoordinator:
                 return
 
             item = self._active_items[item_id]
-            
-            if item.get("is_alarm") != is_alarm:
-                _LOGGER.warning("Type mismatch for item %s", item_id)
-                return
 
             # Set stop event
             if item_id in self._stop_events:
                 self._stop_events[item_id].set()
 
-            # Cancel tasks
-            for task in asyncio.all_tasks():
-                if task.get_name() in [f"playback_{item_id}", f"trigger_{item_id}"]:
-                    task.cancel()
+            # Cancel trigger
+            if item_id in self._trigger_cancel_funcs:
+                try:
+                    self._trigger_cancel_funcs[item_id]()
+                except Exception:
+                    pass
+                del self._trigger_cancel_funcs[item_id]
 
             # Update status
             item["status"] = "stopped"
@@ -415,12 +443,12 @@ class AlarmAndReminderCoordinator:
             async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
             async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, item)
 
-            _LOGGER.info("Stopped %s: %s", "alarm" if is_alarm else "reminder", item_id)
+            _LOGGER.info("Stopped item: %s", item_id)
 
         except Exception as err:
             _LOGGER.error("Error stopping item: %s", err, exc_info=True)
 
-    async def snooze_item(self, item_id: str, minutes: int, is_alarm: bool) -> None:
+    async def snooze_item(self, item_id: str, minutes: int) -> None:
         """Snooze an active item."""
         try:
             if item_id.startswith(f"{DOMAIN}."):
@@ -431,13 +459,9 @@ class AlarmAndReminderCoordinator:
                 return
 
             item = self._active_items[item_id]
-            
-            if item["is_alarm"] != is_alarm:
-                _LOGGER.error("Type mismatch for item %s", item_id)
-                return
 
             # Stop current playback
-            await self.stop_item(item_id, is_alarm)
+            await self.stop_item(item_id)
             await asyncio.sleep(1)
 
             # Calculate new time
@@ -453,23 +477,16 @@ class AlarmAndReminderCoordinator:
                 item["last_rescheduled_from"] = item["last_stopped"]
             item["last_stopped"] = now.isoformat()
             
-            # Step 4: Save to storage
+            # Save to storage
             self._active_items[item_id] = item
             await self.storage.async_save(self._active_items)
+
+            # Schedule new trigger
+            self._schedule_item(item_id, new_time)
 
             self._update_dashboard_state()
             async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
             async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, item)
-
-            # Schedule new trigger
-            delay = (new_time - now).total_seconds()
-            self.hass.loop.call_later(
-                delay,
-                lambda: self.hass.async_create_task(
-                    self._trigger_item(item_id),
-                    name=f"trigger_{item_id}"
-                )
-            )
 
             _LOGGER.info(
                 "Snoozed %s for %d minutes. Will ring at %s",
@@ -491,18 +508,21 @@ class AlarmAndReminderCoordinator:
                         if item_id in self._stop_events:
                             self._stop_events[item_id].set()
                             await asyncio.sleep(0.1)
-                            self._stop_events.pop(item_id)
+                            self._stop_events.pop(item_id, None)
+                        
+                        if item_id in self._trigger_cancel_funcs:
+                            try:
+                                self._trigger_cancel_funcs[item_id]()
+                            except Exception:
+                                pass
+                            del self._trigger_cancel_funcs[item_id]
                         
                         item["status"] = "stopped"
                         self._active_items[item_id] = item
-                        self.hass.states.async_set(
-                            f"{DOMAIN}.{item_id}",
-                            "stopped",
-                            item
-                        )
                         stopped_count += 1
 
             if stopped_count > 0:
+                await self.storage.async_save(self._active_items)
                 self._update_dashboard_state()
                 async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
                 _LOGGER.info("Successfully stopped %d items", stopped_count)
@@ -510,7 +530,7 @@ class AlarmAndReminderCoordinator:
         except Exception as err:
             _LOGGER.error("Error stopping all items: %s", err, exc_info=True)
 
-    async def edit_item(self, item_id: str, changes: dict, is_alarm: bool) -> None:
+    async def edit_item(self, item_id: str, changes: dict) -> None:
         """Edit an existing item."""
         try:
             if item_id.startswith(f"{DOMAIN}."):
@@ -521,17 +541,14 @@ class AlarmAndReminderCoordinator:
                 return
 
             item = self._active_items[item_id]
-            
-            if item.get("is_alarm") != is_alarm:
-                _LOGGER.error("Type mismatch")
-                return
 
             # Update time if provided
             if "time" in changes:
                 time_input = changes["time"]
                 if isinstance(time_input, str):
                     hour, minute = map(int, time_input.split(':'))
-                    time_input = datetime.time(hour, minute)
+                    from datetime import time as dt_time
+                    time_input = dt_time(hour, minute)
                 
                 current_date = changes.get("date", item["scheduled_time"].date())
                 new_time = datetime.combine(current_date, time_input)
@@ -541,26 +558,29 @@ class AlarmAndReminderCoordinator:
                     new_time = new_time + timedelta(days=1)
                 
                 item["scheduled_time"] = new_time
+                changes.pop("time", None)
+                changes.pop("date", None)
 
             # Update other fields
-            for field in ["name", "message", "satellite"]:
-                if field in changes:
-                    item[field] = changes[field]
+            item.update(changes)
 
             self._active_items[item_id] = item
             await self.storage.async_save(self._active_items)
 
-            self.hass.states.async_set(f"{DOMAIN}.{item_id}", "scheduled", item)
+            # Reschedule if time changed and enabled
+            if "scheduled_time" in changes and item.get("enabled", True):
+                self._schedule_item(item_id, item["scheduled_time"])
+
             self._update_dashboard_state()
             async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
             async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, item)
 
-            _LOGGER.info("Edited %s: %s", "alarm" if is_alarm else "reminder", item_id)
+            _LOGGER.info("Edited item: %s", item_id)
 
         except Exception as err:
             _LOGGER.error("Error editing item: %s", err, exc_info=True)
 
-    async def delete_item(self, item_id: str, is_alarm: bool) -> None:
+    async def delete_item(self, item_id: str) -> None:
         """Delete a specific item."""
         try:
             # Remove domain prefix if present
@@ -571,29 +591,28 @@ class AlarmAndReminderCoordinator:
                 _LOGGER.warning("Item %s not found", item_id)
                 return
 
-            item = self._active_items[item_id]
-            
-            # Verify item type matches
-            if item["is_alarm"] != is_alarm:
-                _LOGGER.error("Type mismatch")
-                return
-
             # Stop if active
             if item_id in self._stop_events:
                 self._stop_events[item_id].set()
                 await asyncio.sleep(0.1)
-                self._stop_events.pop(item_id)
+                self._stop_events.pop(item_id, None)
+
+            # Cancel trigger
+            if item_id in self._trigger_cancel_funcs:
+                try:
+                    self._trigger_cancel_funcs[item_id]()
+                except Exception:
+                    pass
+                del self._trigger_cancel_funcs[item_id]
 
             await self.storage.async_delete(item_id)
             self._active_items.pop(item_id)
 
-            # Remove entity (if entity exists)
-            self.hass.states.async_remove(f"{DOMAIN}.{item_id}")
             self._update_dashboard_state()
             async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
             async_dispatcher_send(self.hass, ITEM_DELETED, item_id)
 
-            _LOGGER.info("Deleted %s: %s", "alarm" if is_alarm else "reminder", item_id)
+            _LOGGER.info("Deleted item: %s", item_id)
 
         except Exception as err:
             _LOGGER.error("Error deleting item: %s", err, exc_info=True)
@@ -609,11 +628,18 @@ class AlarmAndReminderCoordinator:
                     if item_id in self._stop_events:
                         self._stop_events[item_id].set()
                         await asyncio.sleep(0.1)
-                        self._stop_events.pop(item_id)
+                        self._stop_events.pop(item_id, None)
+
+                    # Cancel trigger
+                    if item_id in self._trigger_cancel_funcs:
+                        try:
+                            self._trigger_cancel_funcs[item_id]()
+                        except Exception:
+                            pass
+                        del self._trigger_cancel_funcs[item_id]
 
                     await self.storage.async_delete(item_id)
                     self._active_items.pop(item_id)
-                    self.hass.states.async_remove(f"{DOMAIN}.{item_id}")
                     async_dispatcher_send(self.hass, ITEM_DELETED, item_id)
                     deleted_count += 1
 
@@ -644,6 +670,7 @@ class AlarmAndReminderCoordinator:
                     "message": item.get("message"),
                     "is_alarm": bool(item.get("is_alarm")),
                     "sound_file": item.get("sound_file"),
+                    "enabled": item.get("enabled", True),
                 }
                 
                 if item.get("status") == "active":

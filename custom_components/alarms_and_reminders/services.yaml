@@ -64,12 +64,11 @@ set_alarm:
             - "sun"
     sound_file:
       name: Sound File
-      description: Path to custom sound file (default is birds.mp3)
+      description: Select a custom sound file as the ringtone (default is birds.mp3)
       required: false
       example: "/custom_components/alarms_and_reminders/sounds/alarms/birds.mp3"
       selector:
-        text:
-          multiline: false
+        media: {}
     notify_device:
       name: Notify Device
       description: Mobile app device to send notification to
@@ -145,12 +144,11 @@ set_reminder:
             - "sun"
     sound_file:
       name: Sound File
-      description: Path to custom sound file (default is ringtone.mp3)
+      description: Select a custom sound file as the ringtone (default is ringtone.mp3)
       required: false
       example: "/custom_components/alarms_and_reminders/sounds/reminders/ringtone.mp3"
       selector:
-        text:
-          multiline: false
+        media: {}
     notify_device:
       name: Notify Device
       description: Mobile app device to send notification to

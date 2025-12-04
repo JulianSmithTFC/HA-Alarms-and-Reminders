@@ -1,4 +1,4 @@
-voluptuous>=0.13.1
+voluptuous
 pytest
 pytest-homeassistant-custom-component
-librosa>=0.10.0
+librosa

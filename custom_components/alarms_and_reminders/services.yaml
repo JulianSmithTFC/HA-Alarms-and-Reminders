@@ -142,6 +142,28 @@ set_reminder:
             - "fri"
             - "sat"
             - "sun"
+    ringtone:
+      name: Built-in Ringtone
+      description: Select a built-in reminder ringtone (or use custom sound file below)
+      default: "ringtone"
+      required: false
+      selector:
+        select:
+          options:
+            - label: "Ringtone 1"
+              value: "ringtone"
+            - label: "Ringtone 2"
+              value: "ringtone_2"              
+            # - label: "Bell"
+            #   value: "bell"
+            # - label: "Chime"
+            #   value: "chime"
+            # - label: "Digital"
+            #   value: "digital"
+            # - label: "Melodic"
+            #   value: "melodic"
+            # - label: "Soft Alert"
+            #   value: "soft_alert"
     sound_file:
       name: Sound File
       description: Select a custom sound file as the ringtone (default is ringtone.mp3)

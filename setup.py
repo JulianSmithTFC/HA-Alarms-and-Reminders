@@ -8,6 +8,6 @@ setup(
         'voluptuous',
         'homeassistant',
         'aiofiles',
-        'librosa',
+        'pydub',
     ],
 )

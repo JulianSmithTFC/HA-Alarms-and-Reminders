@@ -1,4 +1,4 @@
 voluptuous
 pytest
 pytest-homeassistant-custom-component
-librosa
+pydub

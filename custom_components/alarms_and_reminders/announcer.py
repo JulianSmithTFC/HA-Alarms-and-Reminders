@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
-import librosa
+from pydub import AudioSegment
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.network import get_url
@@ -16,12 +16,13 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class AudioDurationDetector:
-    """Detect audio file duration using librosa."""
+    """Detect audio file duration using pydub."""
     
     @staticmethod
     def get_duration(audio_path: str) -> float:
-        """Get audio duration in seconds using librosa.
+        """Get audio duration in seconds using pydub.
         
+        Supports: MP3, WAV, OGG, FLAC, M4A, and more.
         Returns duration in seconds, or 5.0 as fallback if unable to detect.
         """
         try:
@@ -29,8 +30,13 @@ class AudioDurationDetector:
                 _LOGGER.warning("Audio file not found: %s", audio_path)
                 return 5.0
             
-            duration = librosa.get_duration(filename=audio_path)
-            _LOGGER.debug("librosa detected duration: %.2f seconds for %s", duration, audio_path)
+            # Load audio file
+            audio = AudioSegment.from_file(audio_path)
+            
+            # Get duration in milliseconds and convert to seconds
+            duration = len(audio) / 1000.0
+            
+            _LOGGER.debug("pydub detected duration: %.2f seconds for %s", duration, audio_path)
             return float(duration)
             
         except Exception as err:

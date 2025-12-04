@@ -15,6 +15,6 @@
   "requirements": [
       "python-dateutil",
       "aiofiles",
-      "librosa"
+      "pydub"
   ]
 }

@@ -146,7 +146,6 @@ set_reminder:
       name: Sound File
       description: Select a custom sound file as the ringtone (default is ringtone.mp3)
       required: false
-      example: "/custom_components/alarms_and_reminders/sounds/reminders/ringtone.mp3"
       selector:
         media: {}
     notify_device:

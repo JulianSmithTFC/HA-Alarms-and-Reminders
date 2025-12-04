@@ -46,6 +46,7 @@ class SatelliteStateMonitor:
         self.satellite_entity_id = satellite_entity_id
         self._state_change_callbacks = []
         self._unsub_state_changed = None
+        self._last_state = None
         
     async def async_start(self) -> None:
         """Start monitoring satellite state."""
@@ -57,6 +58,8 @@ class SatelliteStateMonitor:
             if new_state and new_state.entity_id == self.satellite_entity_id:
                 old_status = old_state.state if old_state else "unknown"
                 new_status = new_state.state
+                self._last_state = new_status
+                
                 _LOGGER.debug(
                     "Satellite %s state changed: %s -> %s",
                     self.satellite_entity_id,
@@ -72,6 +75,10 @@ class SatelliteStateMonitor:
                         )
                     except Exception as e:
                         _LOGGER.error("Error in state change callback: %s", e)
+        
+        # Initialize last state
+        state = self.hass.states.get(self.satellite_entity_id)
+        self._last_state = state.state if state else "unknown"
         
         self._unsub_state_changed = self.hass.bus.async_listen(
             "state_changed",
@@ -116,17 +123,28 @@ class Announcer:
         Ring alarm/reminder on satellite with intelligent state tracking.
         
         Flow:
-        1. Start monitoring satellite state
-        2. Announce TTS message
-        3. Play audio file (while monitoring duration and state)
-        4. When audio ends OR satellite becomes idle, loop back to step 2
-        5. If stop_event is set, stop immediately
-        6. If snooze/stop command detected, handle accordingly
+        1. Announce TTS message (alarm/reminder name + time + optional message)
+        2. Play ringtone audio file while monitoring its duration
+        3. Track satellite state transitions during playback
+        4. If satellite becomes idle during playback (sudden idle):
+           - Stop ringing immediately
+           - Mark as completed
+           - Don't restart
+        5. If ringtone finishes naturally:
+           - Announce again (shorter message with just name + time)
+           - Play ringtone again
+           - Repeat until stop_event is triggered
+        6. If satellite transitions to listening (voice command detected):
+           - Stop playback but keep ringing active
+           - Monitor for snooze/stop function calls
+           - If no snooze/stop within 2 seconds, restart announcement
         """
         satellite_entity_id = (
             satellite if satellite.startswith("assist_satellite.")
             else f"assist_satellite.{satellite}"
         )
+        
+        item_id = satellite.split(".")[-1] if "." in satellite else satellite
         
         try:
             # Get audio duration for tracking
@@ -140,12 +158,12 @@ class Announcer:
             )
             
             # Initialize ring state
-            item_id = satellite.split(".")[-1] if "." in satellite else satellite
             ring_state = {
                 "active": True,
                 "audio_duration": audio_duration,
                 "last_announcement_time": None,
                 "announcement_count": 0,
+                "started_at": dt_util.now(),
             }
             self._active_rings[item_id] = ring_state
             
@@ -153,14 +171,13 @@ class Announcer:
             monitor = SatelliteStateMonitor(self.hass, satellite_entity_id)
             await monitor.async_start()
             
-            # Flag to track if we should exit the loop
-            should_exit = False
-            media_playing = False
-            media_start_time = None
+            # Track state transitions during media playback
+            sudden_idle_detected = False
+            voice_command_detected = False
             
             async def _on_satellite_state_changed(old_state: str, new_state: str) -> None:
                 """Handle satellite state changes during ringing."""
-                nonlocal should_exit, media_playing
+                nonlocal sudden_idle_detected, voice_command_detected
                 
                 _LOGGER.debug(
                     "Satellite state change during ring: %s -> %s",
@@ -168,47 +185,44 @@ class Announcer:
                     new_state
                 )
                 
-                # If satellite becomes idle while media is playing, restart announcement
-                if (
-                    old_state == "responding"
-                    and new_state == "idle"
-                    and media_playing
-                ):
-                    _LOGGER.info(
-                        "Satellite %s became idle during playback. "
-                        "Will restart announcement when alarm/reminder still active.",
+                # Sudden idle while playing media = user pressed stop button or stop word detected
+                # This is different from idle after announcement completes
+                if old_state == "responding" and new_state == "idle":
+                    _LOGGER.warning(
+                        "Satellite %s suddenly became idle from responding state. "
+                        "Treating as stop signal (button press or stop word).",
                         satellite_entity_id
                     )
-                    media_playing = False
-                    # Don't exit; let the loop detect idle state and restart
+                    sudden_idle_detected = True
                 
-                # If satellite becomes listening, it may handle voice commands
+                # Voice command detected (user is responding to the alarm)
                 elif old_state == "responding" and new_state == "listening":
-                    _LOGGER.debug(
-                        "Satellite %s changed to listening. "
-                        "Monitoring for snooze/stop voice commands.",
+                    _LOGGER.info(
+                        "Satellite %s detected voice command (listening state). "
+                        "Monitoring for snooze/stop function calls.",
                         satellite_entity_id
                     )
-                    # Stop media but keep ringing active for voice command handling
-                    media_playing = False
+                    voice_command_detected = True
             
             monitor.add_state_change_callback(_on_satellite_state_changed)
             
-            # Main ringing loop
-            loop_count = 0
-            while ring_state["active"] and not should_exit:
-                loop_count += 1
-                
+            # Main ringing cycle
+            while ring_state["active"]:
                 # Check if stop event was set
                 if stop_event and stop_event.is_set():
                     _LOGGER.info("Stop event triggered for %s", item_id)
-                    should_exit = True
                     break
                 
-                # Get current satellite state
-                current_state = monitor.get_current_state()
+                # Check if we detected a sudden idle (stop signal)
+                if sudden_idle_detected:
+                    _LOGGER.info(
+                        "Sudden idle detected for %s. Marking as completed.",
+                        item_id
+                    )
+                    break
                 
-                # Only announce if satellite is idle or ready
+                # Wait for satellite to be ready
+                current_state = monitor.get_current_state()
                 if current_state not in ["idle", "responding", "listening"]:
                     _LOGGER.debug(
                         "Satellite %s in unexpected state: %s. Waiting...",
@@ -219,15 +233,15 @@ class Announcer:
                     continue
                 
                 try:
-                    # Step 1: Announce TTS message
+                    # Step 1: Announce TTS message with alarm/reminder name and time
                     announcement = self._format_announcement(
                         name=name,
                         is_alarm=is_alarm,
                         message=message,
-                        loop_count=loop_count
+                        is_full=True  # Full announcement on first call
                     )
                     
-                    _LOGGER.debug("Announcing: %s", announcement)
+                    _LOGGER.debug("Announcing (full): %s", announcement)
                     
                     await self.hass.services.async_call(
                         "assist_satellite",
@@ -243,16 +257,20 @@ class Announcer:
                     ring_state["last_announcement_time"] = dt_util.now()
                     ring_state["announcement_count"] += 1
                     
-                    # Step 2: Play audio file with duration tracking
+                    # Step 2: Play ringtone audio file with duration-based timing
+                    # Reset state flags for this cycle
+                    sudden_idle_detected = False
+                    voice_command_detected = False
+                    
                     media_start_time = time.time()
-                    media_playing = True
                     
                     _LOGGER.debug(
-                        "Playing audio file: %s (duration: %.2f s)",
+                        "Playing ringtone: %s (duration: %.2f seconds)",
                         sound_file,
                         audio_duration
                     )
                     
+                    # Start playing audio (non-blocking)
                     await self.hass.services.async_call(
                         "assist_satellite",
                         "announce",
@@ -264,51 +282,89 @@ class Announcer:
                         blocking=False
                     )
                     
-                    # Wait for audio to finish or for stop event
+                    # Wait for audio duration to elapse while monitoring state
                     elapsed = 0.0
-                    check_interval = 0.5  # Check state every 500ms
+                    check_interval = 0.3  # Check every 300ms for precise tracking
                     
                     while elapsed < audio_duration:
-                        # Check stop event
+                        # Check if ringing should stop
                         if stop_event and stop_event.is_set():
                             _LOGGER.info(
-                                "Stop event triggered during audio playback (elapsed: %.2f/%.2f)",
+                                "Stop event triggered during audio (elapsed: %.2f/%.2f)",
                                 elapsed,
                                 audio_duration
                             )
-                            should_exit = True
+                            sudden_idle_detected = True
                             break
                         
-                        # Check if satellite became idle (interrupted by user action)
-                        if monitor.get_current_state() == "idle":
-                            elapsed_since_start = time.time() - media_start_time
-                            _LOGGER.debug(
-                                "Satellite became idle during playback (elapsed: %.2f/%.2f)",
-                                elapsed_since_start,
+                        # Check for sudden idle (user pressed stop button)
+                        if sudden_idle_detected:
+                            elapsed_when_detected = elapsed
+                            _LOGGER.info(
+                                "Sudden idle detected during audio playback at %.2f/%.2f seconds",
+                                elapsed_when_detected,
                                 audio_duration
                             )
-                            # Will restart announcement in next loop iteration
-                            media_playing = False
                             break
+                        
+                        # Check for voice command (listening state) - pause but don't stop
+                        if voice_command_detected:
+                            _LOGGER.debug(
+                                "Voice command detected. Will restart if no snooze/stop action within 2 seconds."
+                            )
+                            # Wait 2 seconds to see if a snooze/stop action is called
+                            await asyncio.sleep(2)
+                            
+                            # If stop wasn't called, restart announcement
+                            if not stop_event or not stop_event.is_set():
+                                _LOGGER.info("No snooze/stop action detected. Restarting announcement.")
+                                voice_command_detected = False
+                                break
+                            else:
+                                _LOGGER.info("Stop event detected after voice command.")
+                                break
                         
                         await asyncio.sleep(check_interval)
                         elapsed += check_interval
                     
-                    media_playing = False
+                    _LOGGER.debug(
+                        "Audio playback completed or interrupted (elapsed: %.2f/%.2f)",
+                        elapsed,
+                        audio_duration
+                    )
                     
-                    if should_exit:
+                    # Step 3: After audio finishes, check if we should continue
+                    if sudden_idle_detected or (stop_event and stop_event.is_set()):
+                        _LOGGER.info("Ring stopped for %s due to user action or stop event", item_id)
                         break
                     
-                    # Step 3: Wait before next announcement cycle (or repeat immediately)
-                    # If satellite is idle, restart immediately
-                    if monitor.get_current_state() == "idle":
-                        _LOGGER.debug(
-                            "Satellite idle after audio. Restarting announcement immediately."
-                        )
-                        continue
+                    # If we're here, audio finished naturally - announce and loop
+                    # Short announcement (just name + time, no extra message)
+                    short_announcement = self._format_announcement(
+                        name=name,
+                        is_alarm=is_alarm,
+                        message=None,  # No message for short announcement
+                        is_full=False  # Short announcement
+                    )
                     
-                    # If satellite is still responding, wait a bit before next cycle
-                    await asyncio.sleep(1)
+                    _LOGGER.debug("Announcing (short): %s", short_announcement)
+                    
+                    await self.hass.services.async_call(
+                        "assist_satellite",
+                        "announce",
+                        {
+                            "entity_id": satellite_entity_id,
+                            "message": short_announcement,
+                            "preannounce": False,
+                        },
+                        blocking=True
+                    )
+                    
+                    ring_state["announcement_count"] += 1
+                    ring_state["last_announcement_time"] = dt_util.now()
+                    
+                    # Loop back to play audio again
+                    _LOGGER.debug("Restarting ringtone cycle for %s", item_id)
                     
                 except Exception as err:
                     _LOGGER.error(
@@ -320,9 +376,10 @@ class Announcer:
                     await asyncio.sleep(2)
             
             _LOGGER.info(
-                "Ring completed for %s. Total announcements: %d",
+                "Ring completed for %s. Total full announcements: %d, duration: %s",
                 item_id,
-                ring_state["announcement_count"]
+                ring_state["announcement_count"],
+                dt_util.now() - ring_state["started_at"]
             )
             
         except Exception as err:
@@ -344,15 +401,22 @@ class Announcer:
         self,
         name: str,
         is_alarm: bool,
-        message: str,
-        loop_count: int = 1
+        message: str = None,
+        is_full: bool = True
     ) -> str:
-        """Format announcement message based on type and context."""
+        """Format announcement message based on type and context.
+        
+        Args:
+            name: Alarm/reminder name
+            is_alarm: Whether this is an alarm (True) or reminder (False)
+            message: Optional custom message (only for full announcements)
+            is_full: If True, use full announcement with message; if False, just name + time
+        """
         now = dt_util.now()
         current_time = now.strftime("%I:%M %p").lstrip("0")
         
         if is_alarm:
-            # For alarms, only include name if it's not auto-generated (doesn't start with "alarm_")
+            # For alarms, only include name if it's not auto-generated
             if name and not name.startswith("alarm_"):
                 announcement = f"{name} alarm"
             else:
@@ -360,19 +424,17 @@ class Announcer:
             
             announcement += f". It's {current_time}"
             
-            if message:
+            # Add custom message only for full announcements
+            if is_full and message:
                 announcement += f". {message}"
         else:
             # For reminders, always include the name
             announcement = f"Time to {name}"
             announcement += f". It's {current_time}"
             
-            if message:
+            # Add custom message only for full announcements
+            if is_full and message:
                 announcement += f". {message}"
-        
-        # Add loop indication if ringing multiple times
-        if loop_count > 1:
-            announcement += f" (attempt {loop_count})"
         
         return announcement
     

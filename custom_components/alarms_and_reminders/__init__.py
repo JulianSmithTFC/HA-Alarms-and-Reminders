@@ -69,8 +69,8 @@ REPEAT_OPTIONS = [
     "custom"
 ]
 
-DEFAULT_ALARM_SOUND = "/custom_components/alarms_and_reminders/sounds/alarms/birds.mp3"
-DEFAULT_REMINDER_SOUND = "/custom_components/alarms_and_reminders/sounds/reminders/ringtone.mp3"
+DEFAULT_ALARM_SOUND = "/loacl/alarm&reminder_sounds/alarms/birds.mp3"
+DEFAULT_REMINDER_SOUND = "/local/alarm&reminder_sounds/reminders/ringtone.mp3"
 
 # async def _get_satellites(hass: HomeAssistant) -> list:
 #     """Get list of configured assist satellites."""
@@ -117,13 +117,13 @@ async def _get_mobile_app_service_name(hass: HomeAssistant, device_id: str) -> O
 PLATFORMS = ["switch"]
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up the Alarms and Reminders integration (minimal)."""
+    """Set up the Alarms and Reminders integration."""
     try:
         # Initialize data structure
         hass.data.setdefault(DOMAIN, {})
 
         # Initialize components directly without async imports
-        sounds_dir = Path(__file__).parent / "sounds"
+        sounds_dir = Path(__file__).parent / "alarm&reminder_sounds"
         media_handler = MediaHandler(
             hass,
             str(sounds_dir / "alarms" / "birds.mp3"),

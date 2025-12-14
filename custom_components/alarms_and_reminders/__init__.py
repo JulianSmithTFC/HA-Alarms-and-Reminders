@@ -53,6 +53,7 @@ from .media_player import MediaHandler
 from .announcer import Announcer
 from .intents import async_setup_intents
 from .llm_functions import async_setup_llm_api, async_cleanup_llm_api
+from .sentence_manager import async_setup_sentence_files, async_cleanup_sentence_files
 # from .sensor import async_setup_entry as async_setup_sensor_entry
 # sensor platform removed; scheduling moved to coordinator and switches
 
@@ -902,6 +903,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.warning("Failed to setup LLM API (non-critical): %s", llm_err)
         else:
             _LOGGER.info("LLM API disabled in configuration")
+
+        # Set up sentence files for voice assistant
+        try:
+            await async_setup_sentence_files(hass)
+            _LOGGER.info("Sentence files setup completed")
+        except Exception as sentence_err:
+            _LOGGER.warning("Failed to setup sentence files (non-critical): %s", sentence_err)
+
         # Forward platforms and finish setup
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         return True
@@ -918,7 +927,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await async_cleanup_llm_api(hass)
             _LOGGER.info("LLM API cleanup completed")
         except Exception as llm_err:
-            _LOGGER.debug("Error cleaning up LLM API: %s", llm_err)        
+            _LOGGER.debug("Error cleaning up LLM API: %s", llm_err)
+
+        # Clean up sentence files
+        try:
+            await async_cleanup_sentence_files(hass)
+            _LOGGER.info("Sentence files cleanup completed")
+        except Exception as sentence_err:
+            _LOGGER.debug("Error cleaning up sentence files: %s", sentence_err)
+
         hass.data[DOMAIN].pop(entry.entry_id)
     return unload_ok
 

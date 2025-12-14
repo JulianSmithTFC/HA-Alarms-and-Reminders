@@ -7,6 +7,7 @@ import aiofiles
 import yaml
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 
 from .const import DOMAIN
 
@@ -49,8 +50,9 @@ async def async_setup_sentence_files(hass: HomeAssistant) -> None:
 
     _LOGGER.info("Setting up sentence files from %s to %s", source_dir, target_base)
 
-    # Track created files for cleanup
+    # Track created files for cleanup and whether any files changed
     created_files = []
+    files_changed = False
 
     # Process each language and sentence type
     for language in LANGUAGES:
@@ -89,12 +91,27 @@ async def async_setup_sentence_files(hass: HomeAssistant) -> None:
                     sort_keys=False,
                 )
 
+                # Check if file exists and content changed
+                file_exists = await hass.async_add_executor_job(target_file.exists)
+                content_changed = True
+
+                if file_exists:
+                    # Read existing content to compare
+                    async with aiofiles.open(target_file, "r", encoding="utf-8") as f:
+                        existing_content = await f.read()
+                    content_changed = existing_content != yaml_content
+
                 # Write async to avoid blocking
                 async with aiofiles.open(target_file, "w", encoding="utf-8") as f:
                     await f.write(yaml_content)
 
                 created_files.append(str(target_file))
-                _LOGGER.debug("Created sentence file: %s", target_file)
+
+                if content_changed:
+                    files_changed = True
+                    _LOGGER.debug("Created/updated sentence file: %s", target_file)
+                else:
+                    _LOGGER.debug("Sentence file unchanged: %s", target_file)
 
             except ImportError as err:
                 _LOGGER.warning(
@@ -115,6 +132,21 @@ async def async_setup_sentence_files(hass: HomeAssistant) -> None:
     # Store created files for cleanup and mark as set up
     hass.data[SENTENCE_FILES_KEY] = created_files
     hass.data[SENTENCE_SETUP_KEY] = True
+
+    # Create a repair issue if files were created or modified
+    if files_changed:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            "sentence_files_updated",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="sentence_files_restart_required",
+            learn_more_url="https://www.home-assistant.io/voice_control/custom_sentences_yaml/",
+        )
+        _LOGGER.info(
+            "Sentence files updated. Please reload 'All YAML configuration' in /developer-tools/yaml for changes to take effect."
+        )
 
     _LOGGER.info(
         "Sentence files setup completed. Created %d files.", len(created_files)
@@ -164,5 +196,8 @@ async def async_cleanup_sentence_files(hass: HomeAssistant) -> None:
     # Clean up tracking data
     hass.data.pop(SENTENCE_FILES_KEY, None)
     hass.data.pop(SENTENCE_SETUP_KEY, None)
+
+    # Delete the repair issue if it exists
+    ir.async_delete_issue(hass, DOMAIN, "sentence_files_updated")
 
     _LOGGER.info("Sentence files cleanup completed")

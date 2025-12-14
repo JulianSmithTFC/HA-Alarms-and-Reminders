@@ -38,9 +38,10 @@ DEFAULT_SENTENCES = {
         # ...existing code for task, datetime, time, etc...
         "minutes": {
             "type": "number",
-            "range": [
-                {"from": 1, "to": 60}
-            ]
+            "range": {
+                "from": 1,
+                "to": 60
+            }
         }
     }
 }

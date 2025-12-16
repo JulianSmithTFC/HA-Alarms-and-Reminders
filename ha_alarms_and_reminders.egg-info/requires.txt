@@ -1,4 +1,0 @@
-voluptuous
-homeassistant
-aiofiles
-pydub

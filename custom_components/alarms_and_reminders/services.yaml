@@ -146,7 +146,7 @@ set_reminder:
       name: Built-in Ringtone
       description: Select a built-in reminder ringtone (or use custom sound file below)
       default: "ringtone"
-      required: false
+      required: true
       selector:
         select:
           options:

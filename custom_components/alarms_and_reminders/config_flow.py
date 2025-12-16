@@ -245,6 +245,7 @@ class AlarmAndReminderCoordinator:
                 "entity_id": item_id,
                 "unique_id": item_id,
                 "enabled": True,
+                "ringtone": call.data.get("ringtone"),
                 "sound_file": call.data.get("sound_file"),
                 "notify_device": call.data.get("notify_device"),
             }
@@ -907,6 +908,7 @@ class AlarmAndReminderCoordinator:
                     "scheduled_time": item.get("scheduled_time").isoformat() if isinstance(item.get("scheduled_time"), datetime) else item.get("scheduled_time"),
                     "message": item.get("message"),
                     "is_alarm": bool(item.get("is_alarm")),
+                    "ringtone": item.get("ringtone"),
                     "sound_file": item.get("sound_file"),
                 }
                 if item.get("status") == "active":

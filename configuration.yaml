@@ -1,0 +1,85 @@
+intent_script:
+  SetAlarm:
+    speech:
+      text: "Alarm set for {{ datetime }}"
+    action:
+      - service: alarms_and_reminders.set_alarm
+        data:
+          time: "{{ datetime.split('T')[1] }}"
+          date: "{{ datetime.split('T')[0] }}"
+          satellite: "{{ context.id }}"
+          message: "{{ message | default('') }}"
+
+  StopAlarm:
+    speech:
+      text: "Alarm stopped"
+    action:
+      - service: alarms_and_reminders.stop_alarm
+        target:
+          entity_id: >
+            {% set ns = namespace(found='') %}
+            {% for item_id, item in state_attr('alarms_and_reminders.items', 'alarms').items() %}
+              {% if item.status == 'active' and item.is_alarm %}
+                {% set ns.found = 'alarms_and_reminders.' ~ item_id %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.found }}
+
+  SnoozeAlarm:
+    speech:
+      text: "Alarm snoozed for {{ minutes | default(5) }} minutes"
+    action:
+      - service: alarms_and_reminders.snooze_alarm
+        data:
+          minutes: "{{ minutes | default(5) }}"
+          alarm_id: >
+            {% set ns = namespace(found='') %}
+            {% for item_id, item in state_attr('alarms_and_reminders.items', 'alarms').items() %}
+              {% if item.status == 'active' and item.is_alarm %}
+                {% set ns.found = 'alarms_and_reminders.' ~ item_id %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.found }}
+
+  SetReminder:
+    speech:
+      text: "Reminder set for {{ datetime }}: {{ task }}"
+    action:
+      - service: alarms_and_reminders.set_reminder
+        data:
+          time: "{{ datetime.split('T')[1] }}"
+          date: "{{ datetime.split('T')[0] }}"
+          name: "{{ task }}"
+          satellite: "{{ context.id }}"
+          message: "{{ task }}"
+
+  StopReminder:
+    speech:
+      text: "Reminder stopped"
+    action:
+      - service: alarms_and_reminders.stop_reminder
+        target:
+          entity_id: >
+            {% set ns = namespace(found='') %}
+            {% for item_id, item in state_attr('alarms_and_reminders.items', 'reminders').items() %}
+              {% if item.status == 'active' and not item.is_alarm %}
+                {% set ns.found = 'alarms_and_reminders.' ~ item_id %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.found }}
+
+  SnoozeReminder:
+    speech:
+      text: "Reminder snoozed for {{ minutes | default(5) }} minutes"
+    action:
+      - service: alarms_and_reminders.snooze_reminder
+        data:
+          minutes: "{{ minutes | default(5) }}"
+          reminder_id: >
+            {% set ns = namespace(found='') %}
+            {% for item_id, item in state_attr('alarms_and_reminders.items', 'reminders').items() %}
+              {% if item.status == 'active' and not item.is_alarm %}
+                {% set ns.found = 'alarms_and_reminders.' ~ item_id %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.found }}

@@ -143,34 +143,36 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         
         # Dynamic schema based on available satellites and media players
         ALARM_SERVICE_SCHEMA = vol.Schema({
-            vol.Required("time"): cv.time,  # Make time required
-            vol.Optional("date"): cv.date,
-            vol.Optional(ATTR_NAME): str,  # Optional name for alarms
-            vol.Optional(ATTR_MESSAGE): cv.string,
-            vol.Optional(ATTR_SATELLITE): cv.entity_id,
-            vol.Optional("repeat", default="once"): vol.In(REPEAT_OPTIONS),
-            vol.Optional("repeat_days"): vol.All(
-                cv.ensure_list,
-                [vol.In(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])]
-            ),
-            vol.Optional("sound_file", default=DEFAULT_ALARM_SOUND): cv.string,
-            vol.Optional(ATTR_NOTIFY_DEVICE): cv.string,  # Now device_id as string
-        })
+    vol.Required("time"): cv.time,
+    vol.Optional("date"): cv.date,
+    vol.Optional(ATTR_NAME): str,
+    vol.Optional(ATTR_MESSAGE): cv.string,
+    vol.Optional(ATTR_SATELLITE): cv.entity_id,
+    vol.Optional("repeat", default="once"): vol.In(REPEAT_OPTIONS),
+    vol.Optional("repeat_days"): vol.All(
+        cv.ensure_list,
+        [vol.In(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])]
+    ),
+    vol.Optional("ringtone", default="birds"): cv.string,  # Add default
+    vol.Optional("sound_file", default=DEFAULT_ALARM_SOUND): cv.string,
+    vol.Optional(ATTR_NOTIFY_DEVICE): cv.string,
+})
 
         REMINDER_SERVICE_SCHEMA = vol.Schema({
-            vol.Required("time"): cv.time,  # Make time required
-            vol.Required(ATTR_NAME): str,  # Required name for reminders
-            vol.Optional("date"): cv.date,
-            vol.Optional(ATTR_MESSAGE): cv.string,
-            vol.Optional(ATTR_SATELLITE): cv.entity_id,
-            vol.Optional("repeat", default="once"): vol.In(REPEAT_OPTIONS),
-            vol.Optional("repeat_days"): vol.All(
-                cv.ensure_list,
-                [vol.In(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])]
-            ),
-            vol.Optional("sound_file", default=DEFAULT_REMINDER_SOUND): cv.string,
-            vol.Optional(ATTR_NOTIFY_DEVICE): cv.string,  # Now device_id as string
-        })
+    vol.Required("time"): cv.time,
+    vol.Required(ATTR_NAME): str,
+    vol.Optional("date"): cv.date,
+    vol.Optional(ATTR_MESSAGE): cv.string,
+    vol.Optional(ATTR_SATELLITE): cv.entity_id,
+    vol.Optional("repeat", default="once"): vol.In(REPEAT_OPTIONS),
+    vol.Optional("repeat_days"): vol.All(
+        cv.ensure_list,
+        [vol.In(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])]
+    ),
+    vol.Required("ringtone", default="ringtone"): cv.string,  # Add default - "ringtone" for reminders
+    vol.Optional("sound_file", default=DEFAULT_REMINDER_SOUND): cv.string,
+    vol.Optional(ATTR_NOTIFY_DEVICE): cv.string,
+})
 
         # Store coordinator for future access
         hass.data[DOMAIN]["coordinator"] = coordinator

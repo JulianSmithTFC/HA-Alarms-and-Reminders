@@ -3,6 +3,7 @@ import logging
 import asyncio
 import os
 import time
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
@@ -26,22 +27,104 @@ class AudioDurationDetector:
         Returns duration in seconds, or 5.0 as fallback if unable to detect.
         """
         try:
-            if not os.path.exists(audio_path):
-                _LOGGER.warning("Audio file not found: %s", audio_path)
+            # Normalize path first
+            normalized_path = AudioDurationDetector._normalize_path(audio_path)
+            
+            if not os.path.exists(normalized_path):
+                _LOGGER.warning("Audio file not found: %s (normalized: %s)", audio_path, normalized_path)
                 return 5.0
             
             # Load audio file
-            audio = AudioSegment.from_file(audio_path)
+            audio = AudioSegment.from_file(normalized_path)
             
             # Get duration in milliseconds and convert to seconds
             duration = len(audio) / 1000.0
             
-            _LOGGER.debug("pydub detected duration: %.2f seconds for %s", duration, audio_path)
+            _LOGGER.debug("pydub detected duration: %.2f seconds for %s", duration, normalized_path)
             return float(duration)
             
         except Exception as err:
             _LOGGER.error("Error detecting audio duration for %s: %s", audio_path, err)
             return 5.0
+    
+    @staticmethod
+    def _normalize_path(audio_path: str) -> str:
+        """Convert web URL paths to file system paths."""
+        if not audio_path:
+            return audio_path
+        
+        # If it's already a full file system path, return as-is
+        if audio_path.startswith("/config/"):
+            return audio_path
+        
+        # Convert HTTP URL to path
+        if audio_path.startswith("http://"):
+            audio_path = audio_path.split("/local/", 1)[1] if "/local/" in audio_path else audio_path
+            return f"/config/www/{audio_path}"
+        
+        # Convert /local/ path
+        if audio_path.startswith("/local/"):
+            relative_path = audio_path[7:]  # Remove "/local/" prefix
+            return f"/config/www/{relative_path}"
+        
+        # Convert /www/ path to new structure
+        if audio_path.startswith("/www/"):
+            return f"/config{audio_path}"
+        
+        # Convert old custom component path to www path
+        if audio_path.startswith("/custom_components/alarms_and_reminders/sounds/"):
+            relative_path = audio_path.replace("/custom_components/alarms_and_reminders/sounds/", "")
+            return f"/config/www/alarm&reminder_sounds/{relative_path}"
+        
+        # For unknown paths, try to use as-is
+        return audio_path
+
+
+class AudioFileCopier:
+    """Copy built-in audio files from component to HA www folder."""
+    
+    @staticmethod
+    def copy_audio_files(hass: HomeAssistant) -> None:
+        """Copy built-in audio files from component www folder to HA www folder."""
+        try:
+            # Source: component's www folder
+            component_path = Path(__file__).parent / "www" / "alarm&reminder_sounds"
+            
+            # Destination: HA's www folder
+            config_path = Path(hass.config.path())
+            dest_path = config_path / "www" / "alarm&reminder_sounds"
+            
+            # Create destination directories
+            dest_path.mkdir(parents=True, exist_ok=True)
+            (dest_path / "alarms").mkdir(exist_ok=True)
+            (dest_path / "reminders").mkdir(exist_ok=True)
+            
+            _LOGGER.debug("Audio file destination: %s", dest_path)
+            
+            # Copy alarm files
+            if (component_path / "alarms").exists():
+                for alarm_file in (component_path / "alarms").glob("*"):
+                    if alarm_file.is_file():
+                        dest_file = dest_path / "alarms" / alarm_file.name
+                        shutil.copy2(str(alarm_file), str(dest_file))
+                        _LOGGER.info("Copied alarm file: %s", alarm_file.name)
+            else:
+                _LOGGER.warning("Component alarms directory not found: %s", component_path / "alarms")
+            
+            # Copy reminder files
+            if (component_path / "reminders").exists():
+                for reminder_file in (component_path / "reminders").glob("*"):
+                    if reminder_file.is_file():
+                        dest_file = dest_path / "reminders" / reminder_file.name
+                        shutil.copy2(str(reminder_file), str(dest_file))
+                        _LOGGER.info("Copied reminder file: %s", reminder_file.name)
+            else:
+                _LOGGER.warning("Component reminders directory not found: %s", component_path / "reminders")
+            
+            _LOGGER.info("Audio files copied to %s", dest_path)
+            
+        except Exception as err:
+            _LOGGER.error("Error copying audio files: %s", err, exc_info=True)
 
 
 class SatelliteStateMonitor:
@@ -115,6 +198,9 @@ class Announcer:
         self.hass = hass
         self.duration_detector = AudioDurationDetector()
         self._active_rings: dict = {}  # item_id -> ring state
+        
+        # Copy built-in audio files from component to HA www folder
+        AudioFileCopier.copy_audio_files(hass)
     
     async def announce_on_satellite(
         self,

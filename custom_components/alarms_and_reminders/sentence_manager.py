@@ -80,8 +80,8 @@ async def async_setup_sentence_files(hass: HomeAssistant) -> None:
                     lambda: target_dir.mkdir(parents=True, exist_ok=True)
                 )
 
-                # Write YAML file
-                target_file = target_dir / f"alarms_and_reminders_{sentence_type}.yaml"
+                # Write  file
+                target_file = target_dir / f"alarms&reminders_{sentence_type}.yaml"
 
                 # Convert to YAML string first
                 yaml_content = yaml.safe_dump(
@@ -201,3 +201,4 @@ async def async_cleanup_sentence_files(hass: HomeAssistant) -> None:
     ir.async_delete_issue(hass, DOMAIN, "sentence_files_updated")
 
     _LOGGER.info("Sentence files cleanup completed")
+

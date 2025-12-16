@@ -45,8 +45,23 @@ This integration is actively being developed. Future updates will include:
 
 ## Configuration
 
+### Basic Configuration
+
 The integration can be configured through the UI:
 - Custom sound files for alarms and reminders
+- Satellite selection for announcements
+- Mobile app notifications
+
+### Voice Commands Setup
+
+To enable voice commands, you need to add [intent scripts](./configuration.yaml) to your `configuration.yaml`. The integration supports multiple languages (English, German, French, etc.).
+
+### Important Notes:
+
+1. After adding the intent scripts, restart Home Assistant
+2. The integration automatically loads sentence patterns with the pre-defined languages in HA `custom_sentences` folder
+3. You only need to add the intent scripts for the language(s) you want to use
+4. Make sure your voice assistant is configured to use the correct language
 
 ## Usage
 
@@ -84,7 +99,7 @@ Global Controls:
 - `alarms_and_reminders.stop_all_reminders` - Stop all active reminders
 - `alarms_and_reminders.stop_all` - Stop all active alarms and reminders
 
-### Sensors
+<!-- ### Sensors
 
 The integration provides two sensors:
 - `sensor.scheduled_alarms` - Shows count and details of active alarms
@@ -95,7 +110,7 @@ The integration provides two sensors:
 Each sensor includes:
 - Count of scheduled and active items
 - List of scheduled and active items with details
-- Stop all button for quick control
+- Stop all button for quick control -->
 
 ## Support
 

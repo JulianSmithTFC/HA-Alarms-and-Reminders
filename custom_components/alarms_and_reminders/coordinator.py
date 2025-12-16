@@ -2,6 +2,7 @@
 import logging
 import asyncio
 import re
+import os
 from typing import Dict, Any, Callable, Optional
 from datetime import datetime, timedelta
 
@@ -9,6 +10,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.network import get_url
 
 from .const import DOMAIN, DEFAULT_SNOOZE_MINUTES, DEFAULT_NAME
 from .storage import AlarmReminderStorage
@@ -702,43 +704,41 @@ class AlarmAndReminderCoordinator:
     def _resolve_sound_file(self, ringtone: str = None, sound_file: str = None, is_alarm: bool = False) -> str:
         """Resolve sound file path from ringtone name or custom file.
         
+        Returns the full web URL for the audio file.
         Priority:
-        1. If sound_file is provided, use it (custom file)
-        2. If ringtone is provided, resolve to built-in path
+        1. If sound_file is provided and not empty, use it (custom file)
+        2. If ringtone is provided, resolve to built-in URL
         3. Use default based on alarm/reminder type
         """
-        # If custom sound file is provided, use it
-        if sound_file:
+        # If custom sound file is provided and not empty, use it
+        if sound_file and sound_file.strip():  # Check if not empty string
             _LOGGER.debug("Using custom sound file: %s", sound_file)
-            return sound_file
+            normalized_sound_file = AudioDurationDetector._normalize_path(sound_file)
+            return normalized_sound_file
         
-        # Built-in ringtone paths
+        # Get the base URL (e.g., http://localhost:8123)
+        base_url = get_url(self.hass, allow_external=False) or "http://localhost:8123"
+        
+        # Built-in ringtone URLs (relative to /local/)
         builtin_reminders = {
-            "ringtone": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/reminders/ringtone.mp3",
-            "ringtone_2": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/reminders/ringtone_2.mp3",
-            # "bell": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/reminders/bell.mp3",
-            # "chime": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/reminders/chime.mp3",
-            # "digital": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/reminders/digital.mp3",
-            # "melodic": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/reminders/melodic.mp3",
-            # "soft_alert": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/reminders/soft_alert.mp3",
+            "ringtone": "alarm&reminder_sounds/reminders/ringtone.mp3",
+            "ringtone_2": "alarm&reminder_sounds/reminders/ringtone_2.mp3",
         }
         
         builtin_alarms = {
-            "birds": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/alarms/birds.mp3",
-            # "bells": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/alarms/bells.mp3",
-            # "buzzer": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/alarms/buzzer.mp3",
-            # "chiming_bells": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/alarms/chiming_bells.mp3",
-            # "rooster": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/alarms/rooster.mp3",
-            # "uplifting": "/custom_components/alarms_and_reminders/www/alarm&reminder_sounds/alarms/uplifting.mp3",
+            "birds": "alarm&reminder_sounds/alarms/birds.mp3",
         }
         
         # Resolve built-in ringtone
         builtin_map = builtin_alarms if is_alarm else builtin_reminders
         if ringtone and ringtone in builtin_map:
-            _LOGGER.debug("Using built-in %s: %s", "alarm" if is_alarm else "reminder", ringtone)
-            return builtin_map[ringtone]
+            relative_path = builtin_map[ringtone]
+            full_url = f"{base_url}/local/{relative_path}"
+            _LOGGER.debug("Using built-in %s URL: %s", "alarm" if is_alarm else "reminder", full_url)
+            return full_url
         
         # Fall back to default
-        default = builtin_alarms.get("birds") if is_alarm else builtin_reminders.get("ringtone")
-        _LOGGER.debug("Using default sound file: %s", default)
-        return default
+        default_relative = builtin_alarms.get("birds") if is_alarm else builtin_reminders.get("ringtone")
+        default_url = f"{base_url}/local/{default_relative}"
+        _LOGGER.debug("Using default sound file URL: %s", default_url)
+        return default_url

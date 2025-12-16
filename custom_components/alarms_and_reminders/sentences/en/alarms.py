@@ -33,7 +33,7 @@ DEFAULT_SENTENCES = {
                     "sentences": [
                         "snooze [the] alarm",
                         "snooze [for] {minutes} minutes",
-                        "give me {minutes} more minutes"
+                        "give me {minutes} [more] minutes"
                     ]
                 }
             ]

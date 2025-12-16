@@ -1,0 +1,1 @@
+"""German sentence definitions."""

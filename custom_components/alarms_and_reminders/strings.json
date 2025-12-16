@@ -1,0 +1,8 @@
+{
+  "issues": {
+    "sentence_files_restart_required": {
+      "title": "YAML Configuration Reload Required",
+      "description": "Voice command sentence files have been updated. Please reload 'All YAML configuration' in /developer-tools/yaml for the changes to take effect and enable voice commands for alarms and reminders."
+    }
+  }
+}

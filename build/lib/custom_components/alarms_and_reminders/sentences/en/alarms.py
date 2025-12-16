@@ -65,18 +65,15 @@ DEFAULT_SENTENCES = {
         },
         "hour": {
             "type": "number",
-            "range": {
-                "from": 1,
-                "to": 12
-            }
+            "range": [
+                {"from": 1, "to": 12}
+            ]
         },
         "minute": {
             "type": "number",
-            "range": {
-                "from": 0,
-                "to": 59,
-                "step": 1
-            }
+            "range": [
+                {"from": 0, "to": 59, "step": 1}
+            ]
         },
         "date": {
             "type": "text",
@@ -99,10 +96,9 @@ DEFAULT_SENTENCES = {
         },
         "minutes": {
             "type": "number",
-            "range": {
-                "from": 1,
-                "to": 60
-            }
+            "range": [
+                {"from": 1, "to": 60}
+            ]
         }
     }
 }

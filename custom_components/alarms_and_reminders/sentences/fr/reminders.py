@@ -1,5 +1,5 @@
 
-# custom_components/alarms_and_reminders/sentences/fr/alarm.py
+# custom_components/alarms_and_reminders/sentences/fr/reminders.py
 DEFAULT_SENTENCES = {
     "language": "fr",
     "intents": {

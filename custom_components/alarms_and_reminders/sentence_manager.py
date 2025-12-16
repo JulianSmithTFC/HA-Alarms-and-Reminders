@@ -80,7 +80,7 @@ async def async_setup_sentence_files(hass: HomeAssistant) -> None:
                     lambda: target_dir.mkdir(parents=True, exist_ok=True)
                 )
 
-                # Write  file
+                # Write YAML file
                 target_file = target_dir / f"alarms&reminders_{sentence_type}.yaml"
 
                 # Convert to YAML string first
@@ -141,7 +141,7 @@ async def async_setup_sentence_files(hass: HomeAssistant) -> None:
             "sentence_files_updated",
             is_fixable=False,
             severity=ir.IssueSeverity.WARNING,
-            translation_key="sentence_files_restart_required",
+            translation_key="sentence_files_restart_required_to_take_effect. Make sure to add the [intent_script](https://github.com/omaramin-2000/HA-Alarms-and-Reminders/blob/main/configuration.yaml) to your `configuration.yaml` so, the sentences can work.",
             learn_more_url="https://www.home-assistant.io/voice_control/custom_sentences_yaml/",
         )
         _LOGGER.info(
@@ -201,4 +201,5 @@ async def async_cleanup_sentence_files(hass: HomeAssistant) -> None:
     ir.async_delete_issue(hass, DOMAIN, "sentence_files_updated")
 
     _LOGGER.info("Sentence files cleanup completed")
+
 

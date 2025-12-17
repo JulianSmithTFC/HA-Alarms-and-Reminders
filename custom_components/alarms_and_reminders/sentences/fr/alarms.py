@@ -2,7 +2,7 @@
 DEFAULT_SENTENCES = {
     "language": "fr",
     "intents": {
-        "SetAlarm": {
+        "SetAlarm_FR": {
             "data": [
                 {
                     "sentences": [
@@ -12,7 +12,7 @@ DEFAULT_SENTENCES = {
                 }
             ]
         },
-        "StopAlarm": {
+        "StopAlarm_FR": {
             "data": [
                 {
                     "sentences": [
@@ -24,7 +24,7 @@ DEFAULT_SENTENCES = {
                 }
             ]
         },
-        "SnoozeAlarm": {
+        "SnoozeAlarm_FR": {
             "data": [
                 {
                     "sentences": [

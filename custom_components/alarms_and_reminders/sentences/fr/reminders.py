@@ -3,7 +3,7 @@
 DEFAULT_SENTENCES = {
     "language": "fr",
     "intents": {
-        "SetReminder": {
+        "SetReminder_FR": {
             "data": [
                 {
                     "sentences": [
@@ -13,7 +13,7 @@ DEFAULT_SENTENCES = {
                 }
             ]
         },
-        "StopReminder": {
+        "StopReminder_FR": {
             "data": [
                 {
                     "sentences": [
@@ -24,7 +24,7 @@ DEFAULT_SENTENCES = {
                 }
             ]
         },
-        "SnoozeReminder": {
+        "SnoozeReminder_FR": {
             "data": [
                 {
                     "sentences": [

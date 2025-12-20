@@ -18,6 +18,7 @@ from .const import (
     SERVICE_SNOOZE_REMINDER,
     DEFAULT_SNOOZE_MINUTES,
 )
+from .datetime_parser import parse_datetime_string
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,24 +51,38 @@ class SetAlarmIntentHandler(intent.IntentHandler):
         """Handle the intent."""
         hass = intent_obj.hass
         slots = self.async_validate_slots(intent_obj.slots)
-        
+
         datetime_str = slots["datetime"]["value"]
         message = slots.get("message", {}).get("value", "")
         satellite = intent_obj.context.id  # Get the satellite that received the command
+
+        _LOGGER.info(f"Received SetAlarm intent: datetime='{datetime_str}', satellite={satellite}, slots={slots}")
+
+        # Parse the datetime string
+        try:
+            parsed = parse_datetime_string(datetime_str)
+            time_obj = parsed["time"]
+            date_obj = parsed["date"]
+            _LOGGER.info(f"Successfully parsed alarm: date={date_obj}, time={time_obj}")
+        except ValueError as e:
+            _LOGGER.error(f"Failed to parse datetime '{datetime_str}': {e}")
+            response = intent_obj.create_response()
+            response.async_set_speech(f"Sorry, I couldn't understand the time '{datetime_str}'")
+            return response
 
         await hass.services.async_call(
             DOMAIN,
             SERVICE_SET_ALARM,
             {
-                "time": datetime_str.split("T")[1],
-                "date": datetime_str.split("T")[0],
+                "time": time_obj,
+                "date": date_obj,
                 "satellite": satellite,
                 "message": message
             },
         )
 
         response = intent_obj.create_response()
-        response.async_set_speech(f"Alarm set for {datetime_str}")
+        response.async_set_speech(f"Alarm set for {time_obj.strftime('%I:%M %p')} on {date_obj.strftime('%A, %B %d')}")
         return response
 
 class SetReminderIntentHandler(intent.IntentHandler):
@@ -83,23 +98,42 @@ class SetReminderIntentHandler(intent.IntentHandler):
         """Handle the intent."""
         hass = intent_obj.hass
         slots = self.async_validate_slots(intent_obj.slots)
-        
+
         task = slots["task"]["value"]
         datetime_str = slots["datetime"]["value"]
         satellite = intent_obj.context.id
+
+        _LOGGER.debug(f"Received SetReminder intent: datetime='{datetime_str}', task='{task}', satellite={satellite}")
+
+        # Parse the datetime string
+        try:
+            parsed = parse_datetime_string(datetime_str)
+            time_obj = parsed["time"]
+            date_obj = parsed["date"]
+            _LOGGER.info(f"Successfully parsed reminder: date={date_obj}, time={time_obj}, task='{task}'")
+        except ValueError as e:
+            _LOGGER.error(f"Failed to parse datetime '{datetime_str}': {e}")
+            response = intent_obj.create_response()
+            response.async_set_speech(f"Sorry, I couldn't understand the time '{datetime_str}'")
+            return response
+
+        # Combine date and time into datetime string for the service call
+        from datetime import datetime
+        combined_datetime = datetime.combine(date_obj, time_obj)
+        datetime_str_formatted = combined_datetime.strftime("%Y-%m-%d %H:%M:%S")
 
         await hass.services.async_call(
             DOMAIN,
             SERVICE_SET_REMINDER,
             {
-                "datetime": datetime_str,
+                "datetime": datetime_str_formatted,
                 "satellite": satellite,
                 "message": task
             },
         )
 
         response = intent_obj.create_response()
-        response.async_set_speech(f"Reminder set for {datetime_str}: {task}")
+        response.async_set_speech(f"Reminder set for {time_obj.strftime('%I:%M %p')} on {date_obj.strftime('%A, %B %d')}: {task}")
         return response
 
 class StopAlarmIntentHandler(intent.IntentHandler):

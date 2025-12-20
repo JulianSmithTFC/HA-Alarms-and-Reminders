@@ -487,8 +487,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         )
 
         # Set up intents
-        if DOMAIN not in hass.data:
-            hass.data[DOMAIN] = {}
+        if "intents" not in hass.data[DOMAIN]:
+            hass.data[DOMAIN]["intents"] = {}
             await async_setup_intents(hass)  # Only setup intents once
 
         # Register delete services at the end of async_setup

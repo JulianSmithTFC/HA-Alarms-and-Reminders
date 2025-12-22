@@ -82,47 +82,65 @@ class AudioDurationDetector:
 
 class AudioFileCopier:
     """Copy built-in audio files from component to HA www folder."""
-    
+
     @staticmethod
-    def copy_audio_files(hass: HomeAssistant) -> None:
+    async def copy_audio_files(hass: HomeAssistant) -> None:
         """Copy built-in audio files from component www folder to HA www folder."""
         try:
             # Source: component's www folder
             component_path = Path(__file__).parent / "www" / "alarm&reminder_sounds"
-            
+
             # Destination: HA's www folder
             config_path = Path(hass.config.path())
             dest_path = config_path / "www" / "alarm&reminder_sounds"
-            
-            # Create destination directories
-            dest_path.mkdir(parents=True, exist_ok=True)
-            (dest_path / "alarms").mkdir(exist_ok=True)
-            (dest_path / "reminders").mkdir(exist_ok=True)
-            
+
+            # Create destination directories (use executor to avoid blocking)
+            await hass.async_add_executor_job(
+                lambda: dest_path.mkdir(parents=True, exist_ok=True)
+            )
+            await hass.async_add_executor_job(
+                lambda: (dest_path / "alarms").mkdir(exist_ok=True)
+            )
+            await hass.async_add_executor_job(
+                lambda: (dest_path / "reminders").mkdir(exist_ok=True)
+            )
+
             _LOGGER.debug("Audio file destination: %s", dest_path)
-            
+
             # Copy alarm files
-            if (component_path / "alarms").exists():
-                for alarm_file in (component_path / "alarms").glob("*"):
-                    if alarm_file.is_file():
+            alarms_dir = component_path / "alarms"
+            if await hass.async_add_executor_job(alarms_dir.exists):
+                alarm_files = await hass.async_add_executor_job(
+                    lambda: list(alarms_dir.glob("*"))
+                )
+                for alarm_file in alarm_files:
+                    if await hass.async_add_executor_job(alarm_file.is_file):
                         dest_file = dest_path / "alarms" / alarm_file.name
-                        shutil.copy2(str(alarm_file), str(dest_file))
+                        await hass.async_add_executor_job(
+                            shutil.copy2, str(alarm_file), str(dest_file)
+                        )
                         _LOGGER.info("Copied alarm file: %s", alarm_file.name)
             else:
-                _LOGGER.warning("Component alarms directory not found: %s", component_path / "alarms")
-            
+                _LOGGER.warning("Component alarms directory not found: %s", alarms_dir)
+
             # Copy reminder files
-            if (component_path / "reminders").exists():
-                for reminder_file in (component_path / "reminders").glob("*"):
-                    if reminder_file.is_file():
+            reminders_dir = component_path / "reminders"
+            if await hass.async_add_executor_job(reminders_dir.exists):
+                reminder_files = await hass.async_add_executor_job(
+                    lambda: list(reminders_dir.glob("*"))
+                )
+                for reminder_file in reminder_files:
+                    if await hass.async_add_executor_job(reminder_file.is_file):
                         dest_file = dest_path / "reminders" / reminder_file.name
-                        shutil.copy2(str(reminder_file), str(dest_file))
+                        await hass.async_add_executor_job(
+                            shutil.copy2, str(reminder_file), str(dest_file)
+                        )
                         _LOGGER.info("Copied reminder file: %s", reminder_file.name)
             else:
-                _LOGGER.warning("Component reminders directory not found: %s", component_path / "reminders")
-            
+                _LOGGER.warning("Component reminders directory not found: %s", reminders_dir)
+
             _LOGGER.info("Audio files copied to %s", dest_path)
-            
+
         except Exception as err:
             _LOGGER.error("Error copying audio files: %s", err, exc_info=True)
 
@@ -198,9 +216,6 @@ class Announcer:
         self.hass = hass
         self.duration_detector = AudioDurationDetector()
         self._active_rings: dict = {}  # item_id -> ring state
-        
-        # Copy built-in audio files from component to HA www folder
-        AudioFileCopier.copy_audio_files(hass)
     
     async def announce_on_satellite(
         self,

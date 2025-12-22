@@ -50,7 +50,7 @@ from .const import (
 
 from .coordinator import AlarmAndReminderCoordinator
 from .media_player import MediaHandler
-from .announcer import Announcer
+from .announcer import Announcer, AudioFileCopier
 from .intents import async_setup_intents
 from .llm_functions import async_setup_llm_api, async_cleanup_llm_api
 from .sentence_manager import async_setup_sentence_files, async_cleanup_sentence_files
@@ -131,6 +131,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             str(sounds_dir / "reminders" / "ringtone.mp3")
         )
         announcer = Announcer(hass)
+
+        # Copy audio files asynchronously (non-blocking)
+        await AudioFileCopier.copy_audio_files(hass)
+
         coordinator = AlarmAndReminderCoordinator(
             hass, media_handler, announcer
         )
@@ -774,6 +778,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             str(sounds_dir / "reminders" / "ringtone.mp3"),
         )
         announcer = Announcer(hass)
+
+        # Copy audio files asynchronously (non-blocking)
+        await AudioFileCopier.copy_audio_files(hass)
 
         coordinator = AlarmAndReminderCoordinator(hass, media_handler, announcer)
 

@@ -89,6 +89,7 @@ async def async_setup_entry(
         vol.Optional("satellite"): cv.entity_id,
         vol.Optional("repeat", default="once"): vol.In(REPEAT_OPTIONS),
         vol.Optional("repeat_days"): cv.ensure_list,
+        # vol.Optional("ringtone", default="birds"): cv.string,
         vol.Optional("sound_file", default=DEFAULT_ALARM_SOUND): cv.string,
         vol.Optional("notify_device"): cv.string,
     })
@@ -101,6 +102,7 @@ async def async_setup_entry(
         vol.Optional("satellite"): cv.entity_id,
         vol.Optional("repeat", default="once"): vol.In(REPEAT_OPTIONS),
         vol.Optional("repeat_days"): cv.ensure_list,
+        vol.Optional("ringtone", default="ringtone"): cv.string,
         vol.Optional("sound_file", default=DEFAULT_REMINDER_SOUND): cv.string,
         vol.Optional("notify_device"): cv.string,
     })

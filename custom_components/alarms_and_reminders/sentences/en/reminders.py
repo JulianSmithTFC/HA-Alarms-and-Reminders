@@ -5,11 +5,10 @@ DEFAULT_SENTENCES = {
             "data": [
                 {
                     "sentences": [
-                        "remind me to {task} at {datetime}",
-                        "set a reminder for {task} at {datetime}",
-                        "remind me about {task} on {datetime}",
-                        "create a reminder for {task} at {datetime}",
-                        "set reminder to {task} for {datetime}"
+                        "remind me (to|for|about) {task} at {time} [(on|in)] [{date}]",
+                        "remind me (to|for|about) {task} [(on|in)] [{date}]  at {time}",
+                        "(set|add|create|make|put) [a] reminder (for|to|about) {task} (at|for) {time} [(on|in)] [{date}]",
+                        "(set|add|create|make|put) [a] reminder (for|to|about) {task} [(on|in)] [{date}] (at|for) {time}"
                     ]
                 }
             ]
@@ -31,23 +30,68 @@ DEFAULT_SENTENCES = {
             "data": [
                 {
                     "sentences": [
-                        "snooze [the] reminder",
-                        "snooze reminder [for] {minutes} minutes",
-                        "remind me again in {minutes} minutes",
-                        "postpone [the] reminder [for] {minutes} minutes"
+                        "(snooze|postpone) [the] reminder",
+                        "(snooze|postpone) [the] reminder [for] {minutes} [more] minutes",
+                        "(remind me again in|give me) [more] {minutes} [more] minutes"
                     ]
                 }
             ]
         }
     },
     "lists": {
-        # ...existing code for task, datetime, time, etc...
+        "time": {
+            "type": "text",
+            "values": [
+                "{hour}[(:|.)]{minute} (AM|PM)",
+                "{hour} (AM|PM)"
+            ]
+        },
+        "hour": {
+            "type": "number",
+            "range": {
+                "from": 1,
+                "to": 12
+            }
+        },
+        "minute": {
+            "type": "number",
+            "range": {
+                "from": 0,
+                "to": 59,
+                "step": 1
+            }
+        },
+        "date": {
+            "type": "text",
+            "values": [
+                "today",
+                "tomorrow",
+                "after tomorrow",
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+                "next Monday",
+                "next Tuesday",
+                "next Wednesday",
+                "next Thursday",
+                "next Friday",
+                "next Saturday",
+                "next Sunday"
+            ]
+        },
         "minutes": {
             "type": "number",
             "range": {
                 "from": 1,
                 "to": 60
             }
+        },
+        "task": {
+            "wildcard": true
         }
     }
 }

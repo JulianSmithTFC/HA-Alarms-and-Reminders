@@ -39,8 +39,10 @@ DEFAULT_SENTENCES = {
         "time": {
             "type": "text",
             "values": [
-                "{hour}[(:|.)]{minute}[""](A[.]M|P[.]M)",
-                "{hour}[""](A[.]M|P[.]M)"
+                "{hour}[(:|.|)]{minute}(A.M|P.M|AM|PM)",
+                "{hour}[(:|.|)]{minute} (A.M|P.M|AM|PM)",
+                "{hour} (A.M|P.M|AM|PM)",
+                "{hour}(A.M|P.M|AM|PM)"
             ]
         },
         "hour": {

@@ -52,8 +52,10 @@ class SetAlarmIntentHandler(intent.IntentHandler):
         time_str = slots["time"]["value"]
         date_str = slots.get("date", {}).get("value", "")
         
-        # Extract satellite_id from intent context (from trigger)
-        satellite_id = intent_obj.context.satellite_id if hasattr(intent_obj.context, "satellite_id") else None
+        # Extract satellite_id from intent context
+        satellite_id = None
+        if hasattr(intent_obj.context, "satellite_id"):
+            satellite_id = intent_obj.context.satellite_id
 
         _LOGGER.info(f"Received SetAlarm intent: time='{time_str}', date='{date_str}', satellite_id={satellite_id}")
 
@@ -71,12 +73,14 @@ class SetAlarmIntentHandler(intent.IntentHandler):
             response.async_set_speech(f"Sorry, I couldn't understand the time '{time_str}'")
             return response
 
-        # Build service call data, only including satellite if it's not null
+        # Build service call data - only include satellite if it's a valid entity ID
         service_data = {
             "time": time_obj,
             "date": date_obj,
         }
-        if satellite_id:
+        
+        # Only add satellite if it's a valid entity ID (contains a dot)
+        if satellite_id and isinstance(satellite_id, str) and "." in satellite_id:
             service_data["satellite"] = satellite_id
 
         await hass.services.async_call(
@@ -91,10 +95,10 @@ class SetAlarmIntentHandler(intent.IntentHandler):
 
     @staticmethod
     def _parse_time(time_str: str) -> time_type:
-        """Parse time string like '2:22 pm' to time object."""
+        """Parse time string like '2:22 pm' or '2.22 pm' to time object."""
         time_str = time_str.lower().strip()
         
-        # Handle format: "2:22 pm" or "2:22"
+        # Handle format: "2:22 pm", "2.22 pm", or "2:22"
         if ' ' in time_str:
             parts = time_str.split()
             time_part = parts[0]
@@ -103,9 +107,14 @@ class SetAlarmIntentHandler(intent.IntentHandler):
             time_part = time_str
             period = ""
         
+        # Replace dot with colon for consistency
+        time_part = time_part.replace('.', ':')
+        
         # Parse hour and minute
         if ':' in time_part:
-            hour, minute = map(int, time_part.split(':'))
+            time_components = time_part.split(':')
+            hour = int(time_components[0])
+            minute = int(time_components[1]) if len(time_components) > 1 else 0
         else:
             hour = int(time_part)
             minute = 0
@@ -173,9 +182,10 @@ class SetReminderIntentHandler(intent.IntentHandler):
         date_str = slots.get("date", {}).get("value", "")
         
         # Extract satellite_id from intent context (from trigger)
+        # Fallback to context.id if satellite_id is not available
         satellite_id = intent_obj.context.satellite_id if hasattr(intent_obj.context, "satellite_id") else None
-
-        _LOGGER.info(f"Received SetReminder intent: time='{time_str}', date='{date_str}', task='{task}', satellite_id={satellite_id}")
+        if not satellite_id:
+            satellite_id = intent_obj.context.id
 
         try:
             # Parse time and date
@@ -189,14 +199,16 @@ class SetReminderIntentHandler(intent.IntentHandler):
             response.async_set_speech(f"Sorry, I couldn't understand the time '{time_str}'")
             return response
 
-        # Build service call data, only including satellite if it's not null
+        # Build service call data, only including satellite if it's a valid entity ID
         service_data = {
             "time": time_obj,
             "date": date_obj,
             "name": task,
             "message": task,
         }
-        if satellite_id:
+        
+        # Only add satellite if it's a valid entity ID (contains a dot)
+        if satellite_id and isinstance(satellite_id, str) and "." in satellite_id:
             service_data["satellite"] = satellite_id
 
         await hass.services.async_call(
@@ -219,9 +231,10 @@ class StopAlarmIntentHandler(intent.IntentHandler):
         hass = intent_obj.hass
         
         # Extract satellite_id from intent context (from trigger)
+        # Fallback to context.id if satellite_id is not available
         satellite_id = intent_obj.context.satellite_id if hasattr(intent_obj.context, "satellite_id") else None
-        
-        _LOGGER.info(f"Received StopAlarm intent from satellite_id={satellite_id}")
+        if not satellite_id:
+            satellite_id = intent_obj.context.id
         
         try:
             coordinator = next(
@@ -256,9 +269,10 @@ class StopReminderIntentHandler(intent.IntentHandler):
         hass = intent_obj.hass
         
         # Extract satellite_id from intent context (from trigger)
+        # Fallback to context.id if satellite_id is not available
         satellite_id = intent_obj.context.satellite_id if hasattr(intent_obj.context, "satellite_id") else None
-        
-        _LOGGER.info(f"Received StopReminder intent from satellite_id={satellite_id}")
+        if not satellite_id:
+            satellite_id = intent_obj.context.id
         
         try:
             coordinator = next(
@@ -299,9 +313,10 @@ class SnoozeAlarmIntentHandler(intent.IntentHandler):
         minutes = slots.get("minutes_to_snooze", {}).get("value", DEFAULT_SNOOZE_MINUTES)
         
         # Extract satellite_id from intent context (from trigger)
+        # Fallback to context.id if satellite_id is not available
         satellite_id = intent_obj.context.satellite_id if hasattr(intent_obj.context, "satellite_id") else None
-        
-        _LOGGER.info(f"Received SnoozeAlarm intent: minutes={minutes}, satellite_id={satellite_id}")
+        if not satellite_id:
+            satellite_id = intent_obj.context.id
         
         try:
             coordinator = next(
@@ -342,9 +357,10 @@ class SnoozeReminderIntentHandler(intent.IntentHandler):
         minutes = slots.get("minutes", {}).get("value", DEFAULT_SNOOZE_MINUTES)
         
         # Extract satellite_id from intent context (from trigger)
+        # Fallback to context.id if satellite_id is not available
         satellite_id = intent_obj.context.satellite_id if hasattr(intent_obj.context, "satellite_id") else None
-        
-        _LOGGER.info(f"Received SnoozeReminder intent: minutes={minutes}, satellite_id={satellite_id}")
+        if not satellite_id:
+            satellite_id = intent_obj.context.id
         
         try:
             coordinator = next(

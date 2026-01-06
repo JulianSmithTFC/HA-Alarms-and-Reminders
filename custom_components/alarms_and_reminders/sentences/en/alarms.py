@@ -6,11 +6,10 @@ DEFAULT_SENTENCES = {
             "data": [
                 {
                     "sentences": [
-                        "set an alarm for {datetime}",
-                        "wake me [up] at {datetime}",
-                        "set (the|an) alarm (for|at) {datetime}",
-                        "wake me up at {datetime}",
-                        "set alarm at {datetime}"
+                        "wake me [up] (for|at) {time} [(on|in)] [{date}]",
+                        "wake me [up] [(on|in)] [{date}] [(for|at)] {time}",
+                        "(set|add|create|make|put) [(the|an)] alarm (for|at) {time} [(on|in)] [{date}]",
+                        "(set|add|create|make|put) [(the|an)] alarm [(on|in)] [{date}] [(for|at)] {time}"
                     ]
                 }
             ]
@@ -19,10 +18,7 @@ DEFAULT_SENTENCES = {
             "data": [
                 {
                     "sentences": [
-                        "stop [the] alarm",
-                        "turn off [the] alarm",
-                        "disable [the] alarm",
-                        "cancel [the] alarm"
+                        "(stop|disable|dismiss|cancel|turn off) [the] alarm"
                     ]
                 }
             ]
@@ -31,36 +27,22 @@ DEFAULT_SENTENCES = {
             "data": [
                 {
                     "sentences": [
-                        "snooze [the] alarm",
-                        "snooze [for] {minutes} minutes",
-                        "give me {minutes} [more] minutes"
+                        "(snooze|postpone) [the] alarm",
+                        "(snooze|postpone) [for] {minutes_to_snooze} minutes",
+                        "(wake me [up] again in|give me) [more] {minutes_to_snooze} [more] minutes"
                     ]
                 }
             ]
         }
     },
     "lists": {
-        "datetime": {
-            "type": "text",
-            "values": [
-                "in {time}",
-                "at {time}",
-                "{time} on {date}",
-                "today at {time}",
-                "tomorrow at {time}",
-                "after tomorrow at {time}",
-                "on {date} at {time}"
-            ]
-        },
         "time": {
             "type": "text",
             "values": [
-                "{hour}:{minute} AM",
-                "{hour}:{minute} PM",
-                "{hour} {minute} AM",
-                "{hour} {minute} PM",
-                "{hour} AM",
-                "{hour} PM"
+                "{hour}[(:|.|)]{minute}(A.M|P.M|AM|PM)",
+                "{hour}[(:|.|)]{minute} (A.M|P.M|AM|PM)",
+                "{hour} (A.M|P.M|AM|PM)",
+                "{hour}(A.M|P.M|AM|PM)"
             ]
         },
         "hour": {
@@ -81,6 +63,9 @@ DEFAULT_SENTENCES = {
         "date": {
             "type": "text",
             "values": [
+                "today",
+                "tomorrow",
+                "after tomorrow",
                 "Monday",
                 "Tuesday",
                 "Wednesday",
@@ -97,7 +82,7 @@ DEFAULT_SENTENCES = {
                 "next Sunday"
             ]
         },
-        "minutes": {
+        "minutes_to_snooze": {
             "type": "number",
             "range": {
                 "from": 1,

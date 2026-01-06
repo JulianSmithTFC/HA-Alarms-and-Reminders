@@ -89,6 +89,7 @@ async def async_setup_entry(
         vol.Optional("satellite"): cv.entity_id,
         vol.Optional("repeat", default="once"): vol.In(REPEAT_OPTIONS),
         vol.Optional("repeat_days"): cv.ensure_list,
+        # vol.Optional("ringtone", default="birds"): cv.string,
         vol.Optional("sound_file", default=DEFAULT_ALARM_SOUND): cv.string,
         vol.Optional("notify_device"): cv.string,
     })
@@ -101,6 +102,7 @@ async def async_setup_entry(
         vol.Optional("satellite"): cv.entity_id,
         vol.Optional("repeat", default="once"): vol.In(REPEAT_OPTIONS),
         vol.Optional("repeat_days"): cv.ensure_list,
+        vol.Optional("ringtone", default="ringtone"): cv.string,
         vol.Optional("sound_file", default=DEFAULT_REMINDER_SOUND): cv.string,
         vol.Optional("notify_device"): cv.string,
     })
@@ -143,9 +145,10 @@ async def async_setup_entry(
             message = call.data.get("message", "")
             supplied_name = call.data.get("name")
             satellite = call.data.get("satellite")
-
-            if not satellite:
-                raise ValueError("satellite is required")
+            
+            # Satellite is now optional - if not provided, alarms will only trigger notifications
+            # No need to auto-find or fail, just leave it as None if not provided
+            _LOGGER.debug(f"Setting alarm/reminder with satellite: {satellite}")
 
             # Handle name and ID generation
             if is_alarm:

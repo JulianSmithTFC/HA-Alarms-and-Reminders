@@ -145,9 +145,10 @@ async def async_setup_entry(
             message = call.data.get("message", "")
             supplied_name = call.data.get("name")
             satellite = call.data.get("satellite")
-
-            if not satellite:
-                raise ValueError("satellite is required")
+            
+            # Satellite is now optional - if not provided, alarms will only trigger notifications
+            # No need to auto-find or fail, just leave it as None if not provided
+            _LOGGER.debug(f"Setting alarm/reminder with satellite: {satellite}")
 
             # Handle name and ID generation
             if is_alarm:

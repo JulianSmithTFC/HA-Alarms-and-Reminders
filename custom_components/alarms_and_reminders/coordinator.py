@@ -314,7 +314,7 @@ class AlarmAndReminderCoordinator:
             if item.get("satellite"):
                 await self._satellite_playback_loop(item, stop_event)
             else:
-                _LOGGER.debug("No satellite configured for item %s", item_id)
+                _LOGGER.debug("No satellite configured for item %s, skipping satellite announcement", item_id)
 
             # Update status when playback ends
             if item_id in self._active_items:
@@ -340,7 +340,7 @@ class AlarmAndReminderCoordinator:
         try:
             satellite = item.get("satellite")
             if not satellite:
-                _LOGGER.debug("No satellite configured")
+                _LOGGER.debug("No satellite configured, skipping playback")
                 return
 
             await self.announcer.announce_on_satellite(

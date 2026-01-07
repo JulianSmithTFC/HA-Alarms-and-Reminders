@@ -54,13 +54,13 @@ The integration can be configured through the UI:
 
 ### Voice Commands Setup
 
-To enable voice commands, you need to add [intent scripts](./configuration.yaml) to your `configuration.yaml`. The integration supports multiple languages (English, German, French, etc.).
+The intents are automatically loaded into the `custom_sentences` directory within the first setup, but to reload the sentences, you need to restart HA one more time to take effect. The integration supports multiple languages (English, German, French, etc.).
 
 ### Important Notes:
 
 1. After adding the intent scripts, restart Home Assistant
 2. The integration automatically loads sentence patterns with the pre-defined languages in HA `custom_sentences` folder
-3. You only need to add the intent scripts for the language(s) you want to use
+3. You only need to add the intent scripts for the extra language(s) you want to use
 4. Make sure your voice assistant is configured to use the correct language
 
 ## Usage

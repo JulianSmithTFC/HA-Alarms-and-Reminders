@@ -211,7 +211,8 @@ snooze_alarm:
       required: true
       selector:
         entity:
-          domain: alarms_and_reminders
+          integration: alarms_and_reminders
+          domain: switch
 
 stop_reminder:
   name: Stop Reminder
@@ -223,7 +224,8 @@ stop_reminder:
       required: true
       selector:
         entity:
-          domain: alarms_and_reminders
+          integration: alarms_and_reminders
+          domain: switch
 
 snooze_reminder:
   name: Snooze Reminder
@@ -245,21 +247,24 @@ snooze_reminder:
       required: true
       selector:
         entity:
-          domain: alarms_and_reminders
+          integration: alarms_and_reminders
+          domain: switch
 
 stop:
   name: Stop
   description: Stop an active alarm or reminder
   target:
     entity:
-      domain: alarms_and_reminders
+      integration: alarms_and_reminders
+      domain: switch
 
 snooze:
   name: Snooze
   description: Snooze an active alarm or reminder
   target:
     entity:
-      domain: alarms_and_reminders
+      integration: alarms_and_reminders
+      domain: switch
   fields:
     minutes:
       name: Minutes
@@ -276,7 +281,8 @@ delete:
   description: Delete an alarm or reminder
   target:
     entity:
-      domain: alarms_and_reminders
+      integration: alarms_and_reminders
+      domain: switch
 
 stop_all_alarms:
   name: Stop All Alarms
@@ -303,7 +309,8 @@ edit_alarm:
       required: true
       selector:
         entity:
-          domain: alarms_and_reminders
+          integration: alarms_and_reminders
+          domain: switch
     time:
       name: Time
       description: New time for the alarm (HH:MM format)
@@ -355,7 +362,8 @@ edit_reminder:
       required: true
       selector:
         entity:
-          domain: alarms_and_reminders
+          integration: alarms_and_reminders
+          domain: switch
     time:
       name: Time
       description: New time for the reminder (HH:MM format)
@@ -407,7 +415,8 @@ delete_alarm:
       required: true
       selector:
         entity:
-          domain: alarms_and_reminders
+          integration: alarms_and_reminders
+          domain: switch
 
 delete_reminder:
   name: Delete Reminder
@@ -419,7 +428,8 @@ delete_reminder:
       required: true
       selector:
         entity:
-          domain: alarms_and_reminders
+          integration: alarms_and_reminders
+          domain: switch
 
 delete_all_alarms:
   name: Delete All Alarms

@@ -9,6 +9,10 @@ from datetime import datetime, timedelta
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.entity_registry import async_get as get_entity_registry
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.network import get_url
 
@@ -26,7 +30,7 @@ ITEM_DELETED = f"{DOMAIN}_item_deleted"
 DASHBOARD_UPDATED = f"{DOMAIN}_dashboard_updated"
 
 
-class AlarmAndReminderCoordinator:
+class AlarmAndReminderCoordinator(DataUpdateCoordinator):
     """Coordinates scheduling of alarms and reminders."""
     
     def __init__(self, hass: HomeAssistant, media_handler, announcer):
@@ -234,6 +238,21 @@ class AlarmAndReminderCoordinator:
 
             self._active_items[item_name] = item
             await self.storage.async_save(self._active_items)
+
+            # Register entity in entity registry immediately
+            entity_registry = get_entity_registry(self.hass)
+            entity_id = f"switch.{item_name}"
+            try:
+                entity_registry.async_get_or_create(
+                    domain="switch",
+                    platform=DOMAIN,
+                    unique_id=item_name,
+                    suggested_object_id=item_name,
+                    config_entry_id=None,
+                )
+                _LOGGER.debug("Registered entity %s in registry", entity_id)
+            except Exception as err:
+                _LOGGER.debug("Could not register entity %s: %s", entity_id, err)
 
             # Schedule the trigger
             self._schedule_item(item_name, scheduled_time)
@@ -760,7 +779,7 @@ class AlarmAndReminderCoordinator:
             _LOGGER.error("Error editing item: %s", err, exc_info=True)
 
     async def delete_item(self, item_id: str) -> None:
-        """Delete a specific item."""
+        """Delete a specific item and remove from entity registry."""
         try:
             # Remove domain prefix if present
             if item_id.startswith(f"{DOMAIN}."):
@@ -784,12 +803,24 @@ class AlarmAndReminderCoordinator:
                     pass
                 del self._trigger_cancel_funcs[item_id]
 
+            # Remove from entity registry immediately
+            entity_registry = get_entity_registry(self.hass)
+            entity_id = f"switch.{item_id}"
+            try:
+                entity_registry.async_remove(entity_id)
+                _LOGGER.debug("Removed entity %s from registry", entity_id)
+            except Exception as err:
+                _LOGGER.debug("Entity %s not in registry or already removed: %s", entity_id, err)
+
+            # Delete from storage and memory
             await self.storage.async_delete(item_id)
             self._active_items.pop(item_id)
 
+            # Dispatch event for switch platform
+            async_dispatcher_send(self.hass, ITEM_DELETED, item_id)
+
             self._update_dashboard_state()
             async_dispatcher_send(self.hass, DASHBOARD_UPDATED)
-            async_dispatcher_send(self.hass, ITEM_DELETED, item_id)
 
             _LOGGER.info("Deleted item: %s", item_id)
 
@@ -800,6 +831,8 @@ class AlarmAndReminderCoordinator:
         """Delete all items."""
         try:
             deleted_count = 0
+            entity_registry = get_entity_registry(self.hass)
+            
             for item_id in list(self._active_items.keys()):
                 item = self._active_items[item_id]
                 if is_alarm is None or item["is_alarm"] == is_alarm:
@@ -817,8 +850,19 @@ class AlarmAndReminderCoordinator:
                             pass
                         del self._trigger_cancel_funcs[item_id]
 
+                    # Remove from entity registry
+                    entity_id = f"switch.{item_id}"
+                    try:
+                        entity_registry.async_remove(entity_id)
+                        _LOGGER.debug("Removed entity %s from registry", entity_id)
+                    except Exception as err:
+                        _LOGGER.debug("Entity %s not in registry: %s", entity_id, err)
+
+                    # Delete from storage and memory
                     await self.storage.async_delete(item_id)
                     self._active_items.pop(item_id)
+                    
+                    # Dispatch event so switch platform can remove entity from registry
                     async_dispatcher_send(self.hass, ITEM_DELETED, item_id)
                     deleted_count += 1
 

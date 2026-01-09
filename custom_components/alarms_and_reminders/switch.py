@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
@@ -52,8 +52,26 @@ async def async_setup_entry(
             async_add_entities([entity])
             _LOGGER.debug("Created switch entity for %s", item_id)
 
+    @callback
+    def _on_item_deleted(item_id: str) -> None:
+        """Remove switch entity for deleted item."""
+        if item_id in entities:
+            entities.pop(item_id, None)
+        
+        # Always try to remove from entity registry
+        entity_registry = er.async_get(hass)
+        entity_id = f"switch.{item_id}"
+        try:
+            entity_registry.async_remove(entity_id)
+            _LOGGER.debug("Removed entity %s from registry", entity_id)
+        except Exception as err:
+            _LOGGER.debug("Entity %s not found in registry (may already be removed): %s", entity_id, err)
+
     # Listen for new items
     async_dispatcher_connect(hass, EVENT_ITEM_CREATED, _on_item_created)
+
+    # Listen for deleted items
+    async_dispatcher_connect(hass, EVENT_ITEM_DELETED, _on_item_deleted)
 
     # Create switches for existing items
     try:
@@ -306,74 +324,15 @@ async def async_setup_entry(
         """Delete a single item."""
         try:
             item_id = call.data.get("item_id")
-            item = await storage.async_get(item_id)
-            if not item:
-                raise ValueError(f"Item {item_id} not found")
-
-            # Cancel trigger
-            if item_id in coordinator._trigger_cancel_funcs:
-                try:
-                    coordinator._trigger_cancel_funcs[item_id]()
-                except Exception:
-                    pass
-                del coordinator._trigger_cancel_funcs[item_id]
-
-            # Stop if active
-            if item_id in coordinator._stop_events:
-                coordinator._stop_events[item_id].set()
-                await asyncio.sleep(0.1)
-                coordinator._stop_events.pop(item_id, None)
-
-            # Stop satellite ring if it was ringing
-            await coordinator.announcer.stop_satellite_ring(item_id)
-
-            # Delete from memory and storage
-            coordinator._active_items.pop(item_id, None)
-            await storage.async_delete(item_id)
-
-            _LOGGER.info("Deleted item %s", item_id)
-
+            await coordinator.delete_item(item_id)
         except Exception as err:
             _LOGGER.error("Error deleting item: %s", err, exc_info=True)
 
     async def _handle_delete_all(call: ServiceCall) -> None:
         """Delete all items of a specific type or all items."""
         try:
-            is_alarm = call.data.get("is_alarm")  # None = all, True = alarms only, False = reminders only
-
-            items_to_delete = []
-            if is_alarm is None:
-                items_to_delete = list(coordinator._active_items.keys())
-            else:
-                items_to_delete = [
-                    item_id for item_id, item in coordinator._active_items.items()
-                    if item.get("is_alarm") == is_alarm
-                ]
-
-            for item_id in items_to_delete:
-                # Cancel trigger
-                if item_id in coordinator._trigger_cancel_funcs:
-                    try:
-                        coordinator._trigger_cancel_funcs[item_id]()
-                    except Exception:
-                        pass
-                    del coordinator._trigger_cancel_funcs[item_id]
-
-                # Stop if active
-                if item_id in coordinator._stop_events:
-                    coordinator._stop_events[item_id].set()
-                    await asyncio.sleep(0.1)
-                    coordinator._stop_events.pop(item_id, None)
-
-                # Stop satellite ring if it was ringing
-                await coordinator.announcer.stop_satellite_ring(item_id)
-
-                # Delete from memory and storage
-                coordinator._active_items.pop(item_id, None)
-                await storage.async_delete(item_id)
-
-            _LOGGER.info("Deleted %d items", len(items_to_delete))
-
+            is_alarm = call.data.get("is_alarm")
+            await coordinator.delete_all_items(is_alarm)
         except Exception as err:
             _LOGGER.error("Error deleting items: %s", err, exc_info=True)
 

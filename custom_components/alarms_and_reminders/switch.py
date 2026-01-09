@@ -452,8 +452,27 @@ class AlarmReminderSwitch(SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return True if enabled."""
-        return self._item.get("enabled", True) and self._item.get("status") != "deleted"
+        """Return True if enabled.
+        
+        - For 'once' items: switch is on if enabled AND not completed
+        - For repeated items: switch is on if enabled (regardless of status)
+        """
+        repeat = self._item.get("repeat", "once")
+        enabled = self._item.get("enabled", True)
+        
+        if not enabled:
+            return False
+        
+        # Check if deleted
+        if self._item.get("status") == "deleted":
+            return False
+        
+        # For 'once' items, turn off if completed
+        if repeat == "once" and self._item.get("status") == "completed":
+            return False
+        
+        # For all other cases, return enabled state
+        return enabled
 
     @property
     def icon(self) -> str:
@@ -473,11 +492,20 @@ class AlarmReminderSwitch(SwitchEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return extra attributes."""
+        """Return extra attributes.
+        
+        next_trigger is always calculated based on the item's repeat pattern,
+        regardless of whether the switch is on or off.
+        """
         next_trigger = None
-        sched = self._item.get("scheduled_time")
-        if sched and isinstance(sched, datetime):
-            next_trigger = sched.isoformat()
+        
+        # Calculate next trigger using coordinator's helper method
+        try:
+            next_trigger = self.coordinator._calculate_next_trigger(self._item)
+            if next_trigger and isinstance(next_trigger, datetime):
+                next_trigger = next_trigger.isoformat()
+        except Exception as err:
+            _LOGGER.error("Error calculating next trigger: %s", err)
 
         return {
             "next_trigger": next_trigger,
@@ -512,29 +540,54 @@ class AlarmReminderSwitch(SwitchEntity):
             self.async_write_ha_state()
 
     async def async_turn_on(self) -> None:
-        """Turn on (enable) the item."""
+        """Turn on (enable) the item.
+        
+        For 'once' items that are completed, reset status to 'scheduled'.
+        For all items, recalculate next_trigger and reschedule.
+        """
         if not self._item.get("enabled"):
-            await self.coordinator.storage.async_update(
-                self.item_id,
-                {"enabled": True, "status": "scheduled"},
+            repeat = self._item.get("repeat", "once")
+            status = self._item.get("status", "scheduled")
+            
+            # For 'once' items that are completed, reset to scheduled
+            changes = {"enabled": True}
+            if repeat == "once" and status == "completed":
+                changes["status"] = "scheduled"
+            
+            await self.coordinator.storage.async_update(self.item_id, changes)
+            self.coordinator._active_items[self.item_id].update(changes)
+            
+            # Recalculate and reschedule
+            next_trigger = self.coordinator._calculate_next_trigger(
+                self.coordinator._active_items[self.item_id]
             )
-            self.coordinator._active_items[self.item_id]["enabled"] = True
-            # Reschedule
-            sched_time = self.coordinator._active_items[self.item_id].get("scheduled_time")
-            if sched_time and isinstance(sched_time, datetime):
-                self.coordinator._schedule_item(self.item_id, sched_time)
+            if next_trigger:
+                self.coordinator._active_items[self.item_id]["scheduled_time"] = next_trigger
+                await self.coordinator.storage.async_save(self.coordinator._active_items)
+                self.coordinator._schedule_item(self.item_id, next_trigger)
+                _LOGGER.info("Enabled item %s, next trigger: %s", self.item_id, next_trigger)
 
     async def async_turn_off(self) -> None:
-        """Turn off (disable) the item."""
+        """Turn off (disable) the item.
+        
+        Disables the alarm/reminder by setting enabled=False.
+        """
         if self._item.get("enabled"):
             await self.coordinator.storage.async_update(
                 self.item_id,
                 {"enabled": False},
             )
             self.coordinator._active_items[self.item_id]["enabled"] = False
+            
             # Cancel trigger
             if self.item_id in self.coordinator._trigger_cancel_funcs:
                 try:
                     self.coordinator._trigger_cancel_funcs[self.item_id]()
                 except Exception:
                     pass
+            
+            # Cancel stop event if active
+            if self.item_id in self.coordinator._stop_events:
+                self.coordinator._stop_events[self.item_id].set()
+            
+            _LOGGER.info("Disabled item %s", self.item_id)

@@ -253,6 +253,145 @@ class AlarmAndReminderCoordinator:
             _LOGGER.error("Error scheduling: %s", err, exc_info=True)
             raise
 
+    def _calculate_next_trigger(self, item: dict) -> Optional[datetime]:
+        """Calculate the next trigger time for an item based on repeat type and state.
+        
+        For 'once' items:
+            - If not yet triggered, return scheduled_time
+            - If already triggered/stopped, calculate based on current date + set time
+            - If that time has passed today, return tomorrow at set time
+        
+        For repeated items:
+            - Return the next scheduled occurrence based on repeat pattern
+        
+        Returns:
+            datetime of next trigger, or None if unable to calculate
+        """
+        try:
+            repeat = item.get("repeat", "once")
+            scheduled_time = item.get("scheduled_time")
+            status = item.get("status", "scheduled")
+            
+            if not isinstance(scheduled_time, datetime):
+                if isinstance(scheduled_time, str):
+                    scheduled_time = dt_util.parse_datetime(scheduled_time)
+                else:
+                    return None
+            
+            now = dt_util.now()
+            
+            # For 'once' items, calculate based on current date + set time
+            if repeat == "once":
+                # Get the time part from scheduled_time
+                set_time = scheduled_time.time()
+                today_at_set_time = datetime.combine(now.date(), set_time)
+                today_at_set_time = dt_util.as_local(today_at_set_time)
+                
+                # If today's time hasn't passed, trigger is today
+                if today_at_set_time > now:
+                    return today_at_set_time
+                else:
+                    # If today's time has passed, trigger is tomorrow
+                    tomorrow_at_set_time = today_at_set_time + timedelta(days=1)
+                    return tomorrow_at_set_time
+            
+            # For daily repeats
+            elif repeat == "daily":
+                set_time = scheduled_time.time()
+                today_at_set_time = datetime.combine(now.date(), set_time)
+                today_at_set_time = dt_util.as_local(today_at_set_time)
+                
+                if today_at_set_time > now:
+                    return today_at_set_time
+                else:
+                    tomorrow_at_set_time = today_at_set_time + timedelta(days=1)
+                    return tomorrow_at_set_time
+            
+            # For weekday repeats
+            elif repeat == "weekdays":
+                set_time = scheduled_time.time()
+                current_date = now.date()
+                
+                # Check today first
+                if current_date.weekday() < 5:  # Monday=0, Friday=4
+                    today_at_set_time = datetime.combine(current_date, set_time)
+                    today_at_set_time = dt_util.as_local(today_at_set_time)
+                    if today_at_set_time > now:
+                        return today_at_set_time
+                
+                # Find next weekday
+                days_ahead = 0
+                current_weekday = current_date.weekday()
+                if current_weekday < 5:
+                    days_ahead = 1
+                else:
+                    # Saturday=5, Sunday=6
+                    days_ahead = 7 - current_weekday
+                
+                next_weekday = current_date + timedelta(days=days_ahead)
+                next_trigger = datetime.combine(next_weekday, set_time)
+                return dt_util.as_local(next_trigger)
+            
+            # For weekend repeats
+            elif repeat == "weekends":
+                set_time = scheduled_time.time()
+                current_date = now.date()
+                current_weekday = current_date.weekday()
+                
+                # Check today first
+                if current_weekday >= 5:  # Saturday=5, Sunday=6
+                    today_at_set_time = datetime.combine(current_date, set_time)
+                    today_at_set_time = dt_util.as_local(today_at_set_time)
+                    if today_at_set_time > now:
+                        return today_at_set_time
+                
+                # Find next weekend day
+                if current_weekday < 5:
+                    days_ahead = 5 - current_weekday
+                else:
+                    days_ahead = 7 - current_weekday + 5
+                
+                next_weekend = current_date + timedelta(days=days_ahead)
+                next_trigger = datetime.combine(next_weekend, set_time)
+                return dt_util.as_local(next_trigger)
+            
+            # For weekly repeats with specific days
+            elif repeat == "weekly":
+                repeat_days = item.get("repeat_days", [])
+                if not repeat_days:
+                    return None
+                
+                set_time = scheduled_time.time()
+                current_date = now.date()
+                current_weekday = current_date.weekday()
+                
+                # Check today first
+                if current_weekday in repeat_days:
+                    today_at_set_time = datetime.combine(current_date, set_time)
+                    today_at_set_time = dt_util.as_local(today_at_set_time)
+                    if today_at_set_time > now:
+                        return today_at_set_time
+                
+                # Find next occurrence
+                for days_ahead in range(1, 8):
+                    next_date = current_date + timedelta(days=days_ahead)
+                    if next_date.weekday() in repeat_days:
+                        next_trigger = datetime.combine(next_date, set_time)
+                        return dt_util.as_local(next_trigger)
+                
+                return None
+            
+            # For custom repeats, fall back to scheduled_time
+            elif repeat == "custom":
+                return scheduled_time
+            
+            # Default: return original scheduled_time
+            return scheduled_time
+        
+        except Exception as err:
+            _LOGGER.error("Error calculating next trigger: %s", err, exc_info=True)
+            return item.get("scheduled_time")
+
     async def _trigger_item(self, item_id: str) -> None:
         """Trigger the scheduled item."""
         if item_id not in self._active_items:
@@ -316,11 +455,30 @@ class AlarmAndReminderCoordinator:
             else:
                 _LOGGER.debug("No satellite configured for item %s, skipping satellite announcement", item_id)
 
-            # Update status when playback ends
+            # Update status when playback ends based on repeat type
             if item_id in self._active_items:
                 if self._active_items[item_id].get("status") == "active":
-                    self._active_items[item_id]["status"] = "stopped"
-                    self._active_items[item_id]["last_stopped"] = dt_util.now().isoformat()
+                    item = self._active_items[item_id]
+                    repeat = item.get("repeat", "once")
+                    
+                    # For 'once' items, disable the switch after completion
+                    if repeat == "once":
+                        item["status"] = "completed"
+                        item["enabled"] = False  # Switch will turn off
+                    else:
+                        # For repeated items, keep them enabled and reschedule
+                        item["status"] = "stopped"
+                        
+                        # Calculate next trigger
+                        next_trigger = self._calculate_next_trigger(item)
+                        if next_trigger:
+                            item["scheduled_time"] = next_trigger
+                            # Schedule the next trigger
+                            self._schedule_item(item_id, next_trigger)
+                            _LOGGER.debug("Rescheduled recurring item %s for %s", item_id, next_trigger)
+                    
+                    item["last_stopped"] = dt_util.now().isoformat()
+                    self._active_items[item_id] = item
                     await self.storage.async_save(self._active_items)
                     self._update_dashboard_state()
                     async_dispatcher_send(self.hass, ITEM_UPDATED, item_id, self._active_items[item_id])
@@ -417,7 +575,11 @@ class AlarmAndReminderCoordinator:
             _LOGGER.error("Error handling notification action: %s", err, exc_info=True)
 
     async def stop_item(self, item_id: str) -> None:
-        """Stop an active or scheduled item."""
+        """Stop an active or scheduled item.
+        
+        For 'once' items: mark as stopped, ready to be re-enabled later.
+        For repeated items: reschedule to next occurrence.
+        """
         try:
             if item_id.startswith(f"{DOMAIN}."):
                 item_id = item_id.split(".")[-1]
@@ -427,6 +589,7 @@ class AlarmAndReminderCoordinator:
                 return
 
             item = self._active_items[item_id]
+            repeat = item.get("repeat", "once")
 
             # Set stop event
             if item_id in self._stop_events:
@@ -443,6 +606,15 @@ class AlarmAndReminderCoordinator:
             # Update status
             item["status"] = "stopped"
             item["last_stopped"] = dt_util.now().isoformat()
+            
+            # For 'once' items, calculate next trigger for when user re-enables
+            # For repeated items, reschedule to next occurrence
+            if repeat != "once":
+                next_trigger = self._calculate_next_trigger(item)
+                if next_trigger:
+                    item["scheduled_time"] = next_trigger
+                    _LOGGER.debug("Stopped recurring item %s, next trigger: %s", item_id, next_trigger)
+            
             self._active_items[item_id] = item
             await self.storage.async_save(self._active_items)
 

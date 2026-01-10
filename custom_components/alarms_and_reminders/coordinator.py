@@ -16,8 +16,17 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.network import get_url
 
-from .const import DOMAIN, DEFAULT_SNOOZE_MINUTES, DEFAULT_NAME
+from .const import (
+    DOMAIN,
+    DEFAULT_SNOOZE_MINUTES,
+    DEFAULT_NAME,
+    EVENT_ITEM_CREATED,
+    EVENT_ITEM_UPDATED,
+    EVENT_ITEM_DELETED,
+    EVENT_DASHBOARD_UPDATED,
+)
 from .storage import AlarmReminderStorage
+from .announcer import AudioDurationDetector
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,11 +42,12 @@ DASHBOARD_UPDATED = f"{DOMAIN}_dashboard_updated"
 class AlarmAndReminderCoordinator(DataUpdateCoordinator):
     """Coordinates scheduling of alarms and reminders."""
     
-    def __init__(self, hass: HomeAssistant, media_handler, announcer):
+    def __init__(self, hass: HomeAssistant, media_handler, announcer, config_entry_id: str = None):
         """Initialize coordinator."""
         self.hass = hass
         self.media_handler = media_handler
         self.announcer = announcer
+        self.config_entry_id = config_entry_id 
         self._active_items: Dict[str, Dict[str, Any]] = {}
         self._stop_events: Dict[str, asyncio.Event] = {}
         self._trigger_cancel_funcs: Dict[str, Callable] = {}  # Track scheduled triggers
@@ -248,7 +258,7 @@ class AlarmAndReminderCoordinator(DataUpdateCoordinator):
                     platform=DOMAIN,
                     unique_id=item_name,
                     suggested_object_id=item_name,
-                    config_entry_id=None,
+                    config_entry_id=self.config_entry_id,  # ← Use the stored config_entry_id
                 )
                 _LOGGER.debug("Registered entity %s in registry", entity_id)
             except Exception as err:

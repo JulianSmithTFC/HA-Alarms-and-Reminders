@@ -782,7 +782,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Copy audio files asynchronously (non-blocking)
         await AudioFileCopier.copy_audio_files(hass)
 
-        coordinator = AlarmAndReminderCoordinator(hass, media_handler, announcer)
+        coordinator = AlarmAndReminderCoordinator(hass, media_handler, announcer, entry.entry_id)
 
         # Attach stable id and create device so switches group under one device
         # Use a fixed shared device identifier so all entries use the same device

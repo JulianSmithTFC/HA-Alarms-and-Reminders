@@ -153,102 +153,13 @@ async def async_setup_entry(
 
     # Helper function to schedule items
     async def _schedule_item(call: ServiceCall, is_alarm: bool) -> None:
-        """Schedule new item (alarm or reminder)."""
+        """Schedule new item (alarm or reminder) via the coordinator."""
         try:
-            now = dt_util.now()
-
-            # Parse inputs
-            time_input = call.data.get("time")
-            date_input = call.data.get("date")
-            message = call.data.get("message", "")
-            supplied_name = call.data.get("name")
-            satellite = call.data.get("satellite")
-            
-            # Satellite is now optional - if not provided, alarms will only trigger notifications
-            # No need to auto-find or fail, just leave it as None if not provided
-            _LOGGER.debug(f"Setting alarm/reminder with satellite: {satellite}")
-
-            # Handle name and ID generation
-            if is_alarm:
-                if supplied_name:
-                    item_name = supplied_name.replace(" ", "_").lower()
-                    display_name = supplied_name
-                    # Check if exists
-                    if await storage.async_exists(item_name):
-                        # Generate numeric ID
-                        i = 1
-                        while await storage.async_exists(f"alarm_{i}"):
-                            i += 1
-                        item_name = f"alarm_{i}"
-                        display_name = supplied_name
-                else:
-                    # Generate numeric ID
-                    i = 1
-                    while await storage.async_exists(f"alarm_{i}"):
-                        i += 1
-                    item_name = f"alarm_{i}"
-                    display_name = item_name
-            else:
-                if not supplied_name:
-                    raise ValueError("Reminders require a name")
-                item_name = supplied_name.replace(" ", "_").lower()
-                display_name = supplied_name
-                if await storage.async_exists(item_name):
-                    raise ValueError(f"Reminder name already exists: {supplied_name}")
-
-            # Parse time
-            if isinstance(time_input, str):
-                time_str = time_input.split("T")[-1]
-                parsed = dt_util.parse_time(time_str)
-                if parsed is None:
-                    raise ValueError(f"Invalid time format: {time_input}")
-                time_obj = parsed
-            elif isinstance(time_input, datetime):
-                time_obj = time_input.time()
-            else:
-                time_obj = time_input or now.time()
-
-            # Combine date and time
-            if date_input:
-                scheduled_time = datetime.combine(date_input, time_obj)
-            else:
-                scheduled_time = datetime.combine(now.date(), time_obj)
-
-            scheduled_time = dt_util.as_local(scheduled_time)
-
-            # Push to next day if in past
-            if scheduled_time <= now:
-                scheduled_time = scheduled_time + timedelta(days=1)
-
-            # Build item
-            item = {
-                "scheduled_time": scheduled_time,
-                "satellite": satellite,
-                "message": message,
-                "is_alarm": is_alarm,
-                "repeat": call.data.get("repeat", "once"),
-                "repeat_days": call.data.get("repeat_days", []),
-                "status": "scheduled",
-                "name": display_name,
-                "entity_id": item_name,
-                "unique_id": item_name,
-                "enabled": True,
-                "sound_file": call.data.get("sound_file"),
+            target = {
+                "satellite": call.data.get("satellite"),
                 "notify_device": call.data.get("notify_device"),
             }
-
-            # Save and notify
-            await storage.async_create(item_name, item)
-            coordinator._active_items[item_name] = item
-            coordinator._schedule_item(item_name, scheduled_time)
-
-            _LOGGER.info(
-                "Scheduled %s %s for %s",
-                "alarm" if is_alarm else "reminder",
-                item_name,
-                scheduled_time,
-            )
-
+            await coordinator.schedule_item(call, is_alarm, target)
         except Exception as err:
             _LOGGER.error("Error scheduling item: %s", err, exc_info=True)
 

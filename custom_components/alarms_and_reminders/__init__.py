@@ -31,7 +31,7 @@ from .const import (
     SERVICE_DELETE_ALARM, 
     SERVICE_DELETE_REMINDER,  
     SERVICE_DELETE_ALL_ALARMS,  
-    SERVICE_DELETE_ALL_REMINDERS,  
+    # SERVICE_DELETE_ALL_REMINDERS,
     SERVICE_DELETE_ALL,  
     ATTR_DATETIME,
     ATTR_SATELLITE,
@@ -610,12 +610,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             schema=vol.Schema({})
         )
 
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_DELETE_ALL_REMINDERS,
-            async_delete_all_reminders,
-            schema=vol.Schema({})
-        )
+        # hass.services.async_register(
+        #     DOMAIN,
+        #     SERVICE_DELETE_ALL_REMINDERS,
+        #     async_delete_all_reminders,
+        #     schema=vol.Schema({})
+        # )
 
         hass.services.async_register(
             DOMAIN,
@@ -996,41 +996,41 @@ async def async_stop_all(call: ServiceCall):
     except Exception as err:
         _LOGGER.error("Error stopping all items: %s", err)
 
-# async def async_delete_alarm(call: ServiceCall) -> None:
-#     """Handle delete alarm service call."""
-#     try:
-#         alarm_id = call.data.get("alarm_id") or call.data.get("reminder_id")  # Unified
-#         coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]  # Get coordinator safely
-#
-#         if coordinator:
-#             await coordinator.delete_item(alarm_id)  # No is_alarm needed
-#         else:
-#             _LOGGER.error("No coordinator found")
-#     except Exception as err:
-#         _LOGGER.error("Error deleting alarm: %s", err, exc_info=True)
-#
-# async def async_delete_reminder(call: ServiceCall) -> None:
-#     """Handle delete reminder service call."""
-#     try:
-#         reminder_id = call.data.get("reminder_id")
-#         coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]
-#
-#         if coordinator:
-#             await coordinator.delete_item(reminder_id)
-#         else:
-#             _LOGGER.error("No coordinator found")
-#     except Exception as err:
-#         _LOGGER.error("Error deleting reminder: %s", err, exc_info=True)
-#
-# async def async_delete_all_alarms(call: ServiceCall) -> None:
-#     coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]
-#     if coordinator:
-#         await coordinator.delete_all_items(is_alarm=True)
-#
-# async def async_delete_all_reminders(call: ServiceCall) -> None:
-#     coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]
-#     if coordinator:
-#         await coordinator.delete_all_items(is_alarm=False)
+async def async_delete_alarm(call: ServiceCall) -> None:
+    """Handle delete alarm service call."""
+    try:
+        alarm_id = call.data.get("alarm_id") or call.data.get("reminder_id")  # Unified
+        coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]  # Get coordinator safely
+
+        if coordinator:
+            await coordinator.delete_item(alarm_id)  # No is_alarm needed
+        else:
+            _LOGGER.error("No coordinator found")
+    except Exception as err:
+        _LOGGER.error("Error deleting alarm: %s", err, exc_info=True)
+
+async def async_delete_reminder(call: ServiceCall) -> None:
+    """Handle delete reminder service call."""
+    try:
+        reminder_id = call.data.get("reminder_id")
+        coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]
+
+        if coordinator:
+            await coordinator.delete_item(reminder_id)
+        else:
+            _LOGGER.error("No coordinator found")
+    except Exception as err:
+        _LOGGER.error("Error deleting reminder: %s", err, exc_info=True)
+
+async def async_delete_all_alarms(call: ServiceCall) -> None:
+    coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]
+    if coordinator:
+        await coordinator.delete_all_items(is_alarm=True)
+
+async def async_delete_all_reminders(call: ServiceCall) -> None:
+    coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]
+    if coordinator:
+        await coordinator.delete_all_items(is_alarm=False)
 
 async def async_delete_all(call: ServiceCall) -> None:
     coordinator = hass.data[DOMAIN][list(hass.data[DOMAIN])[0]]["coordinator"]

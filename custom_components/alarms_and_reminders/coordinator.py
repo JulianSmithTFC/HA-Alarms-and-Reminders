@@ -42,12 +42,13 @@ DASHBOARD_UPDATED = f"{DOMAIN}_dashboard_updated"
 class AlarmAndReminderCoordinator(DataUpdateCoordinator):
     """Coordinates scheduling of alarms and reminders."""
     
-    def __init__(self, hass: HomeAssistant, media_handler, announcer, config_entry_id: str = None):
+    def __init__(self, hass: HomeAssistant, media_handler, announcer, config_entry_id: str = None, default_satellite=None):
         """Initialize coordinator."""
         self.hass = hass
         self.media_handler = media_handler
         self.announcer = announcer
-        self.config_entry_id = config_entry_id 
+        self.config_entry_id = config_entry_id
+        self.default_satellite = default_satellite
         self._active_items: Dict[str, Dict[str, Any]] = {}
         self._stop_events: Dict[str, asyncio.Event] = {}
         self._trigger_cancel_funcs: Dict[str, Callable] = {}  # Track scheduled triggers
@@ -224,10 +225,12 @@ class AlarmAndReminderCoordinator(DataUpdateCoordinator):
             if scheduled_time <= now:
                 scheduled_time = scheduled_time + timedelta(days=1)
 
+            satellite = target.get("satellite") or self.default_satellite
+
             # Build item
             item = {
                 "scheduled_time": scheduled_time,
-                "satellite": target.get("satellite"),
+                "satellite": satellite,
                 "message": message,
                 "is_alarm": is_alarm,
                 "repeat": call.data.get("repeat", "once"),

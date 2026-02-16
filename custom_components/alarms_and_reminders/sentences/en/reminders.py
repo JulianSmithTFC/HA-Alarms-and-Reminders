@@ -93,7 +93,7 @@ DEFAULT_SENTENCES = {
             }
         },
         "task": {
-            "wildcard": true
+            "wildcard": True
         }
     }
 }

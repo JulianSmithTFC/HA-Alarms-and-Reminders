@@ -28,8 +28,6 @@ from .const import (
     SERVICE_STOP_ALL,  
     SERVICE_EDIT_ALARM,  
     SERVICE_EDIT_REMINDER,
-    SERVICE_DELETE_ALARM, 
-    SERVICE_DELETE_REMINDER,
     SERVICE_DELETE_ALL,  
     ATTR_DATETIME,
     ATTR_SATELLITE,
@@ -583,23 +581,23 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             except Exception as err:
                 _LOGGER.error("Error deleting all items: %s", err, exc_info=True)
 
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_DELETE_ALARM,
-            async_delete_alarm,
-            schema=vol.Schema({
-                vol.Required("alarm_id"): cv.entity_id,
-            })
-        )
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_DELETE_REMINDER,
-            async_delete_reminder,
-            schema=vol.Schema({
-                vol.Required("reminder_id"): cv.entity_id,
-            })
-        )
+        # hass.services.async_register(
+        #     DOMAIN,
+        #     SERVICE_DELETE_ALARM,
+        #     async_delete_alarm,
+        #     schema=vol.Schema({
+        #         vol.Required("alarm_id"): cv.entity_id,
+        #     })
+        # )
+        #
+        # hass.services.async_register(
+        #     DOMAIN,
+        #     SERVICE_DELETE_REMINDER,
+        #     async_delete_reminder,
+        #     schema=vol.Schema({
+        #         vol.Required("reminder_id"): cv.entity_id,
+        #     })
+        # )
 
         # hass.services.async_register(
         #     DOMAIN,

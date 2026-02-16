@@ -21,9 +21,9 @@ if llm is None:
         async def async_call(self, *args, **kwargs):
             return {"error": "LLM not available"}
 
-    class DeleteAlarmTool:
-        async def async_call(self, *args, **kwargs):
-            return {"error": "LLM not available"}
+    # class DeleteAlarmTool:
+    #     async def async_call(self, *args, **kwargs):
+    #         return {"error": "LLM not available"}
 else:
     from homeassistant.util.json import JsonObjectType
     from homeassistant.util import dt as dt_util
@@ -252,100 +252,100 @@ else:
                 return {"error": f"Failed to list alarms: {str(e)}"}
 
 
-    class DeleteAlarmTool(llm.Tool):
-        """Tool for deleting alarms."""
-
-        name = "delete_alarm"
-        description = "Delete one or more alarms. Use this when the user wants to cancel, remove, or delete an alarm. Can delete by alarm name or all alarms."
-        response_instruction = """
-        Confirm to the user which alarm(s) were deleted.
-        Keep your response concise and friendly, in plain text without formatting.
-        """
-
-        parameters = vol.Schema(
-            {
-                vol.Optional(
-                    "name",
-                    description="Delete alarm(s) by name or partial name match. Example: 'morning' will delete alarms with 'morning' in the name.",
-                ): str,
-                vol.Optional(
-                    "delete_all",
-                    description="Set to true to delete all alarms. Use when user says 'delete all alarms' or 'clear all alarms'.",
-                ): bool,
-            }
-        )
-
-        def wrap_response(self, response: dict) -> dict:
-            response["instruction"] = self.response_instruction
-            return response
-
-        async def async_call(
-            self,
-            hass: HomeAssistant,
-            tool_input: llm.ToolInput,
-            llm_context: llm.LLMContext,
-        ) -> JsonObjectType:
-            """Call the tool to delete alarm(s)."""
-            name = tool_input.tool_args.get("name")
-            delete_all = tool_input.tool_args.get("delete_all", False)
-
-            _LOGGER.info("Deleting alarm: name=%s, delete_all=%s", name, delete_all)
-
-            try:
-                # Get coordinator
-                coordinator = None
-                for entry_id, data in hass.data.get(DOMAIN, {}).items():
-                    if isinstance(data, dict) and "coordinator" in data:
-                        coordinator = data["coordinator"]
-                        break
-
-                if not coordinator:
-                    return {"error": "Alarm system coordinator not found"}
-
-                if delete_all:
-                    # Delete all alarms
-                    await coordinator.delete_all_items(is_alarm=True)
-                    # Count deleted alarms (need to get count before deletion)
-                    alarm_count = sum(1 for item in coordinator._active_items.values() if item.get("is_alarm"))
-                    return self.wrap_response(
-                        {
-                            "success": True,
-                            "deleted_count": alarm_count,
-                            "message": f"Deleted all {alarm_count} alarm{'s' if alarm_count != 1 else ''}",
-                        }
-                    )
-
-                if name:
-                    # Find alarms matching name
-                    deleted_count = 0
-                    name_lower = name.lower()
-                    items_to_delete = []
-
-                    for item_id, item in coordinator._active_items.items():
-                        if not item.get("is_alarm"):
-                            continue
-                        item_name = item.get("name", "").lower()
-                        if name_lower in item_name or name_lower in item_id.lower():
-                            items_to_delete.append(item_id)
-
-                    for item_id in items_to_delete:
-                        await coordinator.delete_item(item_id, is_alarm=True)
-                        deleted_count += 1
-
-                    if deleted_count > 0:
-                        return self.wrap_response(
-                            {
-                                "success": True,
-                                "deleted_count": deleted_count,
-                                "message": f"Deleted {deleted_count} alarm{'s' if deleted_count != 1 else ''} matching '{name}'",
-                            }
-                        )
-                    return {"error": f"No alarms found matching '{name}'"}
-
-                return {
-                    "error": "Please specify a name or set delete_all to true to delete alarms"
-                }
-
-            except Exception as e:
-                _LOGGER.error("Error deleting alarm: %s", e, exc_info=True)
-                return {"error": f"Failed to delete alarm: {str(e)}"}
+    # class DeleteAlarmTool(llm.Tool):
+    #     """Tool for deleting alarms."""
+    #
+    #     name = "delete_alarm"
+    #     description = "Delete one or more alarms. Use this when the user wants to cancel, remove, or delete an alarm. Can delete by alarm name or all alarms."
+    #     response_instruction = """
+    #     Confirm to the user which alarm(s) were deleted.
+    #     Keep your response concise and friendly, in plain text without formatting.
+    #     """
+    #
+    #     parameters = vol.Schema(
+    #         {
+    #             vol.Optional(
+    #                 "name",
+    #                 description="Delete alarm(s) by name or partial name match. Example: 'morning' will delete alarms with 'morning' in the name.",
+    #             ): str,
+    #             vol.Optional(
+    #                 "delete_all",
+    #                 description="Set to true to delete all alarms. Use when user says 'delete all alarms' or 'clear all alarms'.",
+    #             ): bool,
+    #         }
+    #     )
+    #
+    #     def wrap_response(self, response: dict) -> dict:
+    #         response["instruction"] = self.response_instruction
+    #         return response
+    #
+    #     async def async_call(
+    #         self,
+    #         hass: HomeAssistant,
+    #         tool_input: llm.ToolInput,
+    #         llm_context: llm.LLMContext,
+    #     ) -> JsonObjectType:
+    #         """Call the tool to delete alarm(s)."""
+    #         name = tool_input.tool_args.get("name")
+    #         delete_all = tool_input.tool_args.get("delete_all", False)
+    #
+    #         _LOGGER.info("Deleting alarm: name=%s, delete_all=%s", name, delete_all)
+    #
+    #         try:
+    #             # Get coordinator
+    #             coordinator = None
+    #             for entry_id, data in hass.data.get(DOMAIN, {}).items():
+    #                 if isinstance(data, dict) and "coordinator" in data:
+    #                     coordinator = data["coordinator"]
+    #                     break
+    #
+    #             if not coordinator:
+    #                 return {"error": "Alarm system coordinator not found"}
+    #
+    #             if delete_all:
+    #                 # Delete all alarms
+    #                 await coordinator.delete_all_items(is_alarm=True)
+    #                 # Count deleted alarms (need to get count before deletion)
+    #                 alarm_count = sum(1 for item in coordinator._active_items.values() if item.get("is_alarm"))
+    #                 return self.wrap_response(
+    #                     {
+    #                         "success": True,
+    #                         "deleted_count": alarm_count,
+    #                         "message": f"Deleted all {alarm_count} alarm{'s' if alarm_count != 1 else ''}",
+    #                     }
+    #                 )
+    #
+    #             if name:
+    #                 # Find alarms matching name
+    #                 deleted_count = 0
+    #                 name_lower = name.lower()
+    #                 items_to_delete = []
+    #
+    #                 for item_id, item in coordinator._active_items.items():
+    #                     if not item.get("is_alarm"):
+    #                         continue
+    #                     item_name = item.get("name", "").lower()
+    #                     if name_lower in item_name or name_lower in item_id.lower():
+    #                         items_to_delete.append(item_id)
+    #
+    #                 for item_id in items_to_delete:
+    #                     await coordinator.delete_item(item_id, is_alarm=True)
+    #                     deleted_count += 1
+    #
+    #                 if deleted_count > 0:
+    #                     return self.wrap_response(
+    #                         {
+    #                             "success": True,
+    #                             "deleted_count": deleted_count,
+    #                             "message": f"Deleted {deleted_count} alarm{'s' if deleted_count != 1 else ''} matching '{name}'",
+    #                         }
+    #                     )
+    #                 return {"error": f"No alarms found matching '{name}'"}
+    #
+    #             return {
+    #                 "error": "Please specify a name or set delete_all to true to delete alarms"
+    #             }
+    #
+    #         except Exception as e:
+    #             _LOGGER.error("Error deleting alarm: %s", e, exc_info=True)
+    #             return {"error": f"Failed to delete alarm: {str(e)}"}

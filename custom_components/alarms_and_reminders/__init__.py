@@ -117,7 +117,7 @@ async def _get_mobile_app_service_name(hass: HomeAssistant, device_id: str) -> O
 
 PLATFORMS = ["switch"]
 
-async def async_setup(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Alarms and Reminders integration."""
     try:
         # Initialize data structure
@@ -135,9 +135,8 @@ async def async_setup(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Copy audio files asynchronously (non-blocking)
         await AudioFileCopier.copy_audio_files(hass)
 
-        default_satellite = entry.options.get("default_satellite")
         coordinator = AlarmAndReminderCoordinator(
-            hass, media_handler, announcer, entry.entry_id, default_satellite=default_satellite
+            hass, media_handler, announcer
         )
 
         # Initialize the DOMAIN data structure
@@ -787,7 +786,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator = AlarmAndReminderCoordinator(
             hass, media_handler, announcer, entry.entry_id, default_satellite=default_satellite
         )
-
         # Attach stable id and create device so switches group under one device
         # Use a fixed shared device identifier so all entries use the same device
         coordinator.id = "alarms_and_reminders"  # stable identifier shared across entries

@@ -117,7 +117,7 @@ async def _get_mobile_app_service_name(hass: HomeAssistant, device_id: str) -> O
 
 PLATFORMS = ["switch"]
 
-async def async_setup(hass: HomeAssistant, config: ConfigType, entry: ConfigEntry) -> bool:
+async def async_setup(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the Alarms and Reminders integration."""
     try:
         # Initialize data structure

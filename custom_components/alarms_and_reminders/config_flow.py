@@ -10,8 +10,9 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
+from homeassistant.helpers import selector
 
-from .const import DOMAIN, DEFAULT_SNOOZE_MINUTES, DEFAULT_NAME
+from .const import DOMAIN, DEFAULT_SNOOZE_MINUTES, DEFAULT_NAME, DEFAULT_SATELLITE
 from .storage import AlarmReminderStorage
 
 _LOGGER = logging.getLogger(__name__)
@@ -940,3 +941,26 @@ class AlarmsAndRemindersConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="user")
         # create a default entry (no options required)
         return self.async_create_entry(title="Alarms and Reminders", data={})
+
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry):
+        return OptionsFlowHandler(config_entry)
+
+class OptionsFlowHandler(config_entries.OptionsFlow):
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current = self.config_entry.options.get(DEFAULT_SATELLITE)
+
+        schema = vol.Schema(
+            {
+                vol.Optional(DEFAULT_SATELLITE, default=current): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="assist_satellite")
+                )
+            }
+        )
+
+        return self.async_show_form(step_id="init", data_schema=schema)

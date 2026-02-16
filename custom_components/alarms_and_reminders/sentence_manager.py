@@ -141,7 +141,7 @@ async def async_setup_sentence_files(hass: HomeAssistant) -> None:
             "sentence_files_updated",
             is_fixable=False,
             severity=ir.IssueSeverity.WARNING,
-            translation_key="sentence_files_restart_required_to_take_effect. Make sure to add the [intent_script](https://github.com/omaramin-2000/HA-Alarms-and-Reminders/blob/main/configuration.yaml) to your `configuration.yaml` so, the sentences can work.",
+            translation_key="sentence_files_restart_required_to_take_effect. Make sure to add the [intent_script](https://github.com/JulianSmithTFC/HA-Alarms-and-Reminders/blob/main/configuration.yaml) to your `configuration.yaml` so, the sentences can work.",
             learn_more_url="https://www.home-assistant.io/voice_control/custom_sentences_yaml/",
         )
         _LOGGER.info(

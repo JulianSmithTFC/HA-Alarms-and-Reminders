@@ -276,13 +276,13 @@ snooze:
           max: 60
           step: 1
 
-delete:
-  name: Delete
-  description: Delete an alarm or reminder
-  target:
-    entity:
-      integration: alarms_and_reminders
-      domain: switch
+#delete:
+#  name: Delete
+#  description: Delete an alarm or reminder
+#  target:
+#    entity:
+#      integration: alarms_and_reminders
+#      domain: switch
 
 stop_all_alarms:
   name: Stop All Alarms
@@ -405,41 +405,41 @@ edit_reminder:
           integration: mobile_app
           multiple: false
 
-delete_alarm:
-  name: Delete Alarm
-  description: Delete a specific alarm
-  fields:
-    alarm_id:
-      name: Alarm ID
-      description: The ID of the alarm to delete
-      required: true
-      selector:
-        entity:
-          integration: alarms_and_reminders
-          domain: switch
+#delete_alarm:
+#  name: Delete Alarm
+#  description: Delete a specific alarm
+#  fields:
+#    alarm_id:
+#      name: Alarm ID
+#      description: The ID of the alarm to delete
+#      required: true
+#      selector:
+#        entity:
+#          integration: alarms_and_reminders
+#          domain: switch
+#
+#delete_reminder:
+#  name: Delete Reminder
+#  description: Delete a specific reminder
+#  fields:
+#    reminder_id:
+#      name: Reminder ID
+#      description: The ID of the reminder to delete
+#      required: true
+#      selector:
+#        entity:
+#          integration: alarms_and_reminders
+#          domain: switch
 
-delete_reminder:
-  name: Delete Reminder
-  description: Delete a specific reminder
-  fields:
-    reminder_id:
-      name: Reminder ID
-      description: The ID of the reminder to delete
-      required: true
-      selector:
-        entity:
-          integration: alarms_and_reminders
-          domain: switch
-
-delete_all_alarms:
-  name: Delete All Alarms
-  description: Delete all alarms
-  fields: {}
-
-delete_all_reminders:
-  name: Delete All Reminders
-  description: Delete all reminders
-  fields: {}
+#delete_all_alarms:
+#  name: Delete All Alarms
+#  description: Delete all alarms
+#  fields: {}
+#
+#delete_all_reminders:
+#  name: Delete All Reminders
+#  description: Delete all reminders
+#  fields: {}
 
 delete_all:
   name: Delete All

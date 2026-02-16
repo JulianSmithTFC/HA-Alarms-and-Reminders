@@ -6,6 +6,8 @@ import re
 from datetime import datetime, timedelta
 import asyncio
 
+import voluptuous as vol
+
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_point_in_time

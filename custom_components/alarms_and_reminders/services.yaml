@@ -431,10 +431,10 @@ delete_reminder:
           integration: alarms_and_reminders
           domain: switch
 
-delete_all_alarms:
-  name: Delete All Alarms
-  description: Delete all alarms
-  fields: {}
+#delete_all_alarms:
+#  name: Delete All Alarms
+#  description: Delete all alarms
+#  fields: {}
 
 #delete_all_reminders:
 #  name: Delete All Reminders

@@ -29,8 +29,7 @@ from .const import (
     SERVICE_EDIT_ALARM,  
     SERVICE_EDIT_REMINDER,
     SERVICE_DELETE_ALARM, 
-    SERVICE_DELETE_REMINDER,  
-    SERVICE_DELETE_ALL_ALARMS,
+    SERVICE_DELETE_REMINDER,
     SERVICE_DELETE_ALL,  
     ATTR_DATETIME,
     ATTR_SATELLITE,
@@ -602,12 +601,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             })
         )
 
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_DELETE_ALL_ALARMS,
-            async_delete_all_alarms,
-            schema=vol.Schema({})
-        )
+        # hass.services.async_register(
+        #     DOMAIN,
+        #     SERVICE_DELETE_ALL_ALARMS,
+        #     async_delete_all_alarms,
+        #     schema=vol.Schema({})
+        # )
 
         # hass.services.async_register(
         #     DOMAIN,
